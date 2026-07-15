@@ -52,7 +52,7 @@ Niri在Alt+Tab切换窗口，截图的时候等都会出现一个提示信息，
 
 目前，我使用过程中只发现了快捷键提示信息，窗口切换的Scope提示信息，以及截图的提示信息这三个场景，所以目前暂时修改了这三个地方使用一个蓝绿色渐变的模拟Mica材质的背景提示Overlay。
 
-![Alt+Tab Overlay样式截图](./image/1784099699660.png)
+![Alt+Tab Overlay样式截图](./images/overlay-style.png)
 
 ## Codex
 

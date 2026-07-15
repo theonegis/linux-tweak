@@ -1,0 +1,554 @@
+#!/usr/bin/python3
+import os
+import sys
+import time
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
+import dbus
+import dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+
+BUS_NAME = "com.deepin.filemanager.filedialog"
+MANAGER_IFACE = "com.deepin.filemanager.filedialogmanager"
+DIALOG_IFACE = "com.deepin.filemanager.filedialog"
+PROPERTIES_IFACE = "org.freedesktop.DBus.Properties"
+INTROSPECT_IFACE = "org.freedesktop.DBus.Introspectable"
+MANAGER_PATH = "/com/deepin/filemanager/filedialogmanager"
+LOG_PATH = "/tmp/wechat-deepin-dialog-shim.log"
+
+
+MANAGER_XML = """<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect"><arg name="xml" type="s" direction="out"/></method>
+  </interface>
+  <interface name="com.deepin.filemanager.filedialogmanager">
+    <method name="createDialog"><arg name="key" type="s" direction="in"/><arg name="path" type="o" direction="out"/></method>
+    <method name="destroyDialog"><arg name="path" type="o" direction="in"/></method>
+    <method name="dialogs"><arg name="dialogObjectList" type="ao" direction="out"/></method>
+    <method name="errorString"><arg name="error" type="s" direction="out"/></method>
+    <method name="isUseFileChooserDialog"><arg name="ok" type="b" direction="out"/></method>
+    <method name="canUseFileChooserDialog"><arg name="ok" type="b" direction="out"/><arg name="group" type="s" direction="in"/><arg name="executableFileName" type="s" direction="in"/></method>
+    <method name="globPatternsForMime"><arg name="mime" type="s" direction="in"/><arg name="patterns" type="as" direction="out"/></method>
+    <method name="monitorFiles"><arg name="files" type="as" direction="out"/></method>
+    <method name="showBluetoothTransDialog"><arg name="id" type="s" direction="in"/><arg name="URIs" type="as" direction="in"/></method>
+  </interface>
+</node>"""
+
+DIALOG_XML = """<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect"><arg name="xml" type="s" direction="out"/></method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Properties">
+    <method name="Get"><arg name="interface" type="s" direction="in"/><arg name="property" type="s" direction="in"/><arg name="value" type="v" direction="out"/></method>
+    <method name="Set"><arg name="interface" type="s" direction="in"/><arg name="property" type="s" direction="in"/><arg name="value" type="v" direction="in"/></method>
+    <method name="GetAll"><arg name="interface" type="s" direction="in"/><arg name="props" type="a{sv}" direction="out"/></method>
+  </interface>
+  <interface name="com.deepin.filemanager.filedialog">
+    <property name="directory" type="s" access="readwrite"/>
+    <property name="directoryUrl" type="s" access="readwrite"/>
+    <property name="nameFilters" type="as" access="readwrite"/>
+    <property name="filter" type="i" access="readwrite"/>
+    <property name="viewMode" type="i" access="readwrite"/>
+    <property name="acceptMode" type="i" access="readwrite"/>
+    <property name="windowActive" type="b" access="read"/>
+    <property name="heartbeatInterval" type="i" access="readwrite"/>
+    <property name="windowFlags" type="u" access="readwrite"/>
+    <property name="hideOnAccept" type="b" access="readwrite"/>
+    <method name="selectFile"><arg name="filename" type="s" direction="in"/></method>
+    <method name="selectedFiles"><arg name="filelist" type="as" direction="out"/></method>
+    <method name="selectUrl"><arg name="url" type="s" direction="in"/></method>
+    <method name="selectedUrls"><arg name="urllist" type="as" direction="out"/></method>
+    <method name="selectNameFilter"><arg name="filter" type="s" direction="in"/></method>
+    <method name="selectedNameFilter"><arg name="filter" type="s" direction="out"/></method>
+    <method name="selectNameFilterByIndex"><arg name="index" type="i" direction="in"/></method>
+    <method name="selectedNameFilterIndex"><arg name="index" type="i" direction="out"/></method>
+    <method name="setFileMode"><arg name="fileMode" type="i" direction="in"/></method>
+    <method name="setLabelText"><arg name="label" type="i" direction="in"/><arg name="text" type="s" direction="in"/></method>
+    <method name="labelText"><arg name="label" type="i" direction="in"/><arg name="text" type="s" direction="out"/></method>
+    <method name="setOptions"><arg name="options" type="i" direction="in"/></method>
+    <method name="setOption"><arg name="option" type="i" direction="in"/><arg name="on" type="b" direction="in"/></method>
+    <method name="options"><arg name="options" type="i" direction="out"/></method>
+    <method name="testOption"><arg name="option" type="i" direction="in"/><arg name="on" type="b" direction="out"/></method>
+    <method name="setCurrentInputName"><arg name="name" type="s" direction="in"/></method>
+    <method name="show"/>
+    <method name="open"/>
+    <method name="hide"/>
+    <method name="accept"/>
+    <method name="reject"/>
+    <method name="winId"><arg name="windowId" type="t" direction="out"/></method>
+    <method name="setWindowTitle"><arg name="title" type="s" direction="in"/></method>
+    <method name="deleteLater"/>
+    <method name="activateWindow"/>
+    <method name="makeHeartbeat"/>
+    <method name="addCustomWidget"><arg name="type" type="i" direction="in"/><arg name="data" type="s" direction="in"/></method>
+    <method name="getCustomWidgetValue"><arg name="type" type="i" direction="in"/><arg name="text" type="s" direction="in"/><arg name="value" type="v" direction="out"/></method>
+    <method name="allCustomWidgetsValue"><arg name="type" type="i" direction="in"/><arg name="values" type="a{sv}" direction="out"/></method>
+    <method name="beginAddCustomWidget"/>
+    <method name="endAddCustomWidget"/>
+    <method name="addDisableUrlScheme"><arg name="type" type="s" direction="in"/></method>
+    <method name="setAllowMixedSelection"><arg name="on" type="b" direction="in"/></method>
+    <signal name="finished"><arg name="result" type="i"/></signal>
+    <signal name="accepted"/>
+    <signal name="rejected"/>
+    <signal name="windowActiveChanged"/>
+    <signal name="destroyed"/>
+    <signal name="selectionFilesChanged"/>
+    <signal name="currentUrlChanged"/>
+    <signal name="directoryChanged"/>
+    <signal name="directoryUrlChanged"/>
+    <signal name="selectedNameFilterChanged"/>
+  </interface>
+</node>"""
+
+
+def log(message):
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with open(LOG_PATH, "a", encoding="utf-8") as file:
+        file.write(f"[{stamp}] {message}\n")
+
+
+def file_uri_to_path(uri):
+    parsed = urlparse(str(uri))
+    if parsed.scheme == "file":
+        return unquote(parsed.path)
+    return str(uri)
+
+
+class FileDialog(dbus.service.Object):
+    def __init__(self, bus, path, manager, key):
+        super().__init__(bus, path)
+        self.bus = bus
+        self.path = path
+        self.manager = manager
+        self.key = key
+        self.title = "Open"
+        self.directory = str(Path.home())
+        self.directory_url = ""
+        self.name_filters = dbus.Array([], signature="s")
+        self.selected_filter = ""
+        self.selected_filter_index = 0
+        self.selected_files_value = dbus.Array([], signature="s")
+        self.selected_urls_value = dbus.Array([], signature="s")
+        self.current_input_name = ""
+        self.file_mode = 1
+        self.accept_mode = 0
+        self.options_value = 0
+        self.hide_on_accept = True
+        self.window_flags = dbus.UInt32(0)
+        self.heartbeat_interval = 0
+        self.window_active = False
+        self.portal_request = None
+        log(f"dialog created path={path} key={key}")
+
+    def _property_map(self):
+        return {
+            "directory": dbus.String(self.directory, variant_level=1),
+            "directoryUrl": dbus.String(self.directory_url, variant_level=1),
+            "nameFilters": dbus.Array(self.name_filters, signature="s", variant_level=1),
+            "filter": dbus.Int32(self.selected_filter_index, variant_level=1),
+            "viewMode": dbus.Int32(0, variant_level=1),
+            "acceptMode": dbus.Int32(self.accept_mode, variant_level=1),
+            "windowActive": dbus.Boolean(self.window_active, variant_level=1),
+            "heartbeatInterval": dbus.Int32(self.heartbeat_interval, variant_level=1),
+            "windowFlags": dbus.UInt32(self.window_flags, variant_level=1),
+            "hideOnAccept": dbus.Boolean(self.hide_on_accept, variant_level=1),
+        }
+
+    def _set_directory_hint(self, value):
+        path = file_uri_to_path(value)
+        if os.path.isdir(path):
+            self.directory = path
+            log(f"{self.path} directory hint -> {self.directory}")
+            return
+
+        directory = os.path.dirname(path.rstrip(os.sep))
+        if directory and os.path.isdir(directory):
+            self.directory = directory
+            log(f"{self.path} directory hint parent -> {self.directory}")
+
+    def _remember_default_name_from_path(self, value):
+        path = file_uri_to_path(value)
+        self._set_directory_hint(path)
+
+        name = os.path.basename(path.rstrip(os.sep))
+        if name:
+            self.current_input_name = name
+            log(f"{self.path} default filename -> {self.current_input_name}")
+
+    @dbus.service.method(INTROSPECT_IFACE, out_signature="s")
+    def Introspect(self):
+        log(f"{self.path} Introspect")
+        return DIALOG_XML
+
+    @dbus.service.method(PROPERTIES_IFACE, in_signature="ss", out_signature="v")
+    def Get(self, interface, prop):
+        log(f"{self.path} Properties.Get {interface}.{prop}")
+        return self._property_map().get(prop, dbus.String("", variant_level=1))
+
+    @dbus.service.method(PROPERTIES_IFACE, in_signature="ssv")
+    def Set(self, interface, prop, value):
+        log(f"{self.path} Properties.Set {interface}.{prop}={value!r}")
+        if prop == "directory":
+            self._set_directory_hint(value)
+        elif prop == "directoryUrl":
+            self.directory_url = str(value)
+            self._set_directory_hint(value)
+        elif prop == "nameFilters":
+            self.name_filters = dbus.Array(value, signature="s")
+        elif prop == "filter":
+            self.selected_filter_index = int(value)
+        elif prop == "acceptMode":
+            self.accept_mode = int(value)
+        elif prop == "heartbeatInterval":
+            self.heartbeat_interval = int(value)
+        elif prop == "windowFlags":
+            self.window_flags = dbus.UInt32(value)
+        elif prop == "hideOnAccept":
+            self.hide_on_accept = bool(value)
+
+    @dbus.service.method(PROPERTIES_IFACE, in_signature="s", out_signature="a{sv}")
+    def GetAll(self, interface):
+        log(f"{self.path} Properties.GetAll {interface}")
+        return self._property_map()
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="s")
+    def selectFile(self, filename):
+        log(f"{self.path} selectFile {filename}")
+        self.selected_files_value = dbus.Array([filename], signature="s")
+        self._remember_default_name_from_path(filename)
+
+    @dbus.service.method(DIALOG_IFACE, out_signature="as")
+    def selectedFiles(self):
+        log(f"{self.path} selectedFiles -> {list(self.selected_files_value)}")
+        return self.selected_files_value
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="s")
+    def selectUrl(self, url):
+        log(f"{self.path} selectUrl {url}")
+        self.selected_urls_value = dbus.Array([url], signature="s")
+        self.selected_files_value = dbus.Array([file_uri_to_path(url)], signature="s")
+        self._remember_default_name_from_path(url)
+
+    @dbus.service.method(DIALOG_IFACE, out_signature="as")
+    def selectedUrls(self):
+        log(f"{self.path} selectedUrls -> {list(self.selected_urls_value)}")
+        return self.selected_urls_value
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="s")
+    def selectNameFilter(self, filter_text):
+        log(f"{self.path} selectNameFilter {filter_text}")
+        self.selected_filter = filter_text
+
+    @dbus.service.method(DIALOG_IFACE, out_signature="s")
+    def selectedNameFilter(self):
+        log(f"{self.path} selectedNameFilter -> {self.selected_filter}")
+        return self.selected_filter
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="i")
+    def selectNameFilterByIndex(self, index):
+        log(f"{self.path} selectNameFilterByIndex {index}")
+        self.selected_filter_index = int(index)
+
+    @dbus.service.method(DIALOG_IFACE, out_signature="i")
+    def selectedNameFilterIndex(self):
+        log(f"{self.path} selectedNameFilterIndex -> {self.selected_filter_index}")
+        return dbus.Int32(self.selected_filter_index)
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="i")
+    def setFileMode(self, file_mode):
+        log(f"{self.path} setFileMode {file_mode}")
+        self.file_mode = int(file_mode)
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="is")
+    def setLabelText(self, label, text):
+        log(f"{self.path} setLabelText {label} {text}")
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="i", out_signature="s")
+    def labelText(self, label):
+        log(f"{self.path} labelText {label}")
+        return ""
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="i")
+    def setOptions(self, options):
+        log(f"{self.path} setOptions {options}")
+        self.options_value = int(options)
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="ib")
+    def setOption(self, option, on):
+        log(f"{self.path} setOption {option} {on}")
+
+    @dbus.service.method(DIALOG_IFACE, out_signature="i")
+    def options(self):
+        log(f"{self.path} options -> {self.options_value}")
+        return dbus.Int32(self.options_value)
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="i", out_signature="b")
+    def testOption(self, option):
+        log(f"{self.path} testOption {option}")
+        return False
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="s")
+    def setCurrentInputName(self, name):
+        log(f"{self.path} setCurrentInputName {name}")
+        self.current_input_name = str(name)
+
+    def _open_portal(self):
+        log(f"{self.path} opening portal title={self.title} directory={self.directory} file_mode={self.file_mode} accept_mode={self.accept_mode} current_input_name={self.current_input_name}")
+        portal = self.bus.get_object("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop")
+        chooser = dbus.Interface(portal, "org.freedesktop.portal.FileChooser")
+        options = {
+            "modal": dbus.Boolean(True),
+            "multiple": dbus.Boolean(self.file_mode == 3),
+            "directory": dbus.Boolean(self.file_mode == 2),
+        }
+        current_folder = self.directory if os.path.isdir(self.directory) else str(Path.home())
+        options["current_folder"] = dbus.ByteArray(os.fsencode(current_folder))
+
+        if self.accept_mode == 1:
+            if self.current_input_name:
+                options["current_name"] = dbus.String(self.current_input_name)
+            request_path = chooser.SaveFile("", self.title or "Save", options)
+        else:
+            request_path = chooser.OpenFile("", self.title or "Open", options)
+
+        self.portal_request = str(request_path)
+        self.bus.add_signal_receiver(
+            self._portal_response,
+            signal_name="Response",
+            dbus_interface="org.freedesktop.portal.Request",
+            path=self.portal_request,
+        )
+        log(f"{self.path} portal request {self.portal_request}")
+
+    def _portal_response(self, response, results):
+        log(f"{self.path} portal response response={response} results={dict(results)!r}")
+        if int(response) == 0:
+            uris = [str(uri) for uri in results.get("uris", [])]
+            self.selected_urls_value = dbus.Array(uris, signature="s")
+            self.selected_files_value = dbus.Array([file_uri_to_path(uri) for uri in uris], signature="s")
+            self.accepted()
+            self.finished(dbus.Int32(1))
+        else:
+            self.rejected()
+            self.finished(dbus.Int32(0))
+
+    @dbus.service.method(DIALOG_IFACE)
+    def show(self):
+        log(f"{self.path} show")
+        self._open_portal()
+
+    @dbus.service.method(DIALOG_IFACE)
+    def open(self):
+        log(f"{self.path} open")
+        self._open_portal()
+
+    @dbus.service.method(DIALOG_IFACE)
+    def hide(self):
+        log(f"{self.path} hide")
+
+    @dbus.service.method(DIALOG_IFACE)
+    def accept(self):
+        log(f"{self.path} accept")
+        self.accepted()
+        self.finished(dbus.Int32(1))
+
+    @dbus.service.method(DIALOG_IFACE)
+    def reject(self):
+        log(f"{self.path} reject")
+        self.rejected()
+        self.finished(dbus.Int32(0))
+
+    @dbus.service.method(DIALOG_IFACE, out_signature="t")
+    def winId(self):
+        log(f"{self.path} winId -> 0")
+        return dbus.UInt64(0)
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="s")
+    def setWindowTitle(self, title):
+        log(f"{self.path} setWindowTitle {title}")
+        self.title = str(title)
+
+    @dbus.service.method(DIALOG_IFACE)
+    def deleteLater(self):
+        log(f"{self.path} deleteLater")
+        self.destroyed()
+        self.manager.destroy_path(self.path)
+
+    @dbus.service.method(DIALOG_IFACE)
+    def activateWindow(self):
+        log(f"{self.path} activateWindow")
+
+    @dbus.service.method(DIALOG_IFACE)
+    def makeHeartbeat(self):
+        log(f"{self.path} makeHeartbeat")
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="is")
+    def addCustomWidget(self, widget_type, data):
+        log(f"{self.path} addCustomWidget {widget_type} {data}")
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="is", out_signature="v")
+    def getCustomWidgetValue(self, widget_type, text):
+        log(f"{self.path} getCustomWidgetValue {widget_type} {text}")
+        return dbus.String("", variant_level=1)
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="i", out_signature="a{sv}")
+    def allCustomWidgetsValue(self, widget_type):
+        log(f"{self.path} allCustomWidgetsValue {widget_type}")
+        return dbus.Dictionary({}, signature="sv")
+
+    @dbus.service.method(DIALOG_IFACE)
+    def beginAddCustomWidget(self):
+        log(f"{self.path} beginAddCustomWidget")
+
+    @dbus.service.method(DIALOG_IFACE)
+    def endAddCustomWidget(self):
+        log(f"{self.path} endAddCustomWidget")
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="s")
+    def addDisableUrlScheme(self, scheme):
+        log(f"{self.path} addDisableUrlScheme {scheme}")
+
+    @dbus.service.method(DIALOG_IFACE, in_signature="b")
+    def setAllowMixedSelection(self, on):
+        log(f"{self.path} setAllowMixedSelection {on}")
+
+    @dbus.service.signal(DIALOG_IFACE, signature="i")
+    def finished(self, result):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def accepted(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def rejected(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def windowActiveChanged(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def destroyed(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def selectionFilesChanged(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def currentUrlChanged(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def directoryChanged(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def directoryUrlChanged(self):
+        pass
+
+    @dbus.service.signal(DIALOG_IFACE)
+    def selectedNameFilterChanged(self):
+        pass
+
+
+class FileDialogManager(dbus.service.Object):
+    def __init__(self, bus):
+        super().__init__(bus, MANAGER_PATH)
+        self.bus = bus
+        self.counter = 0
+        self.dialogs_by_path = {}
+        log("manager started")
+
+    @dbus.service.method(INTROSPECT_IFACE, out_signature="s")
+    def Introspect(self):
+        log("manager Introspect")
+        return MANAGER_XML
+
+    @dbus.service.method(MANAGER_IFACE, in_signature="s", out_signature="o")
+    def createDialog(self, key):
+        self.counter += 1
+        path = f"/com/deepin/filemanager/filedialog/{self.counter}"
+        self.dialogs_by_path[path] = FileDialog(self.bus, path, self, key)
+        log(f"createDialog key={key} -> {path}")
+        return dbus.ObjectPath(path)
+
+    def destroy_path(self, path):
+        dialog = self.dialogs_by_path.pop(str(path), None)
+        if dialog:
+            dialog.remove_from_connection()
+            log(f"destroyed {path}")
+
+    @dbus.service.method(MANAGER_IFACE, in_signature="o")
+    def destroyDialog(self, path):
+        log(f"destroyDialog {path}")
+        self.destroy_path(path)
+
+    @dbus.service.method(MANAGER_IFACE, out_signature="ao")
+    def dialogs(self):
+        log("dialogs")
+        return dbus.Array([dbus.ObjectPath(path) for path in self.dialogs_by_path], signature="o")
+
+    @dbus.service.method(MANAGER_IFACE, out_signature="s")
+    def errorString(self):
+        log("errorString")
+        return ""
+
+    @dbus.service.method(MANAGER_IFACE, out_signature="b")
+    def isUseFileChooserDialog(self):
+        log("isUseFileChooserDialog -> true")
+        return True
+
+    @dbus.service.method(MANAGER_IFACE, in_signature="ss", out_signature="b")
+    def canUseFileChooserDialog(self, group, executableFileName):
+        log(f"canUseFileChooserDialog group={group} executable={executableFileName} -> true")
+        return True
+
+    @dbus.service.method(MANAGER_IFACE, in_signature="s", out_signature="as")
+    def globPatternsForMime(self, mime):
+        log(f"globPatternsForMime {mime}")
+        return dbus.Array([], signature="s")
+
+    @dbus.service.method(MANAGER_IFACE, out_signature="as")
+    def monitorFiles(self):
+        log("monitorFiles")
+        return dbus.Array([], signature="s")
+
+    @dbus.service.method(MANAGER_IFACE, in_signature="sas")
+    def showBluetoothTransDialog(self, ident, uris):
+        log(f"showBluetoothTransDialog id={ident} uris={list(uris)}")
+
+
+def check_running():
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SessionBus()
+    try:
+        bus.get_name_owner(BUS_NAME)
+        return 0
+    except dbus.DBusException:
+        return 1
+
+
+def main():
+    if "--check" in sys.argv:
+        return check_running()
+
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SessionBus()
+    name = dbus.service.BusName(BUS_NAME, bus, allow_replacement=False, replace_existing=False, do_not_queue=True)
+    FileDialogManager(bus)
+    log(f"owning {BUS_NAME}: {name.get_name()}")
+    GLib.MainLoop().run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

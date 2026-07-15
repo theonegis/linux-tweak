@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export QT_PLUGIN_PATH=/usr/lib/qt/plugins
+export QT_QPA_PLATFORMTHEME=xdgdesktopportal
+
+if ! /home/tanzhenyu/.local/bin/wechat-deepin-dialog-shim --check >/dev/null 2>&1; then
+    nohup /home/tanzhenyu/.local/bin/wechat-deepin-dialog-shim >>/tmp/wechat-deepin-dialog-shim.out 2>&1 &
+    sleep 0.4
+fi
+
+exec /opt/wechat/wechat "$@"

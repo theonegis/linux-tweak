@@ -1,0 +1,99 @@
+# Local-only PKGBUILD. Values are supplied by update-build-install.sh.
+
+: "${NIRI_SRC:?NIRI_SRC is required}"
+: "${NIRI_PKGVER:?NIRI_PKGVER is required}"
+: "${NIRI_COMMIT:?NIRI_COMMIT is required}"
+
+pkgname=niri-acrylic
+pkgver="${NIRI_PKGVER}"
+pkgrel=1
+pkgdesc='Niri with blue-green Mica native information overlays'
+arch=('x86_64')
+url='https://github.com/niri-wm/niri'
+license=('GPL-3.0-or-later')
+# CachyOS enables GCC LTO globally. libspa-sys builds a C wrapper archive that
+# is later linked by Rust through clang/lld; GCC LTO objects are incompatible
+# with that final link and leave spa_*_libspa_rs symbols unresolved.
+options=('!lto')
+depends=(
+  'cairo'
+  'glib2'
+  'glibc'
+  'inter-font'
+  'libdisplay-info'
+  'libgcc'
+  'libinput'
+  'libpipewire'
+  'libxkbcommon'
+  'mesa'
+  'pango'
+  'pixman'
+  'seatd'
+  'systemd-libs'
+  'xdg-desktop-portal-impl'
+)
+makedepends=(
+  'clang'
+  'rust'
+)
+optdepends=(
+  'alacritty: suggested GPU-accelerated terminal emulator'
+  'bash: niri-session login-shell support'
+  'fuzzel: suggested Wayland application launcher'
+  'mako: suggested Wayland notification daemon'
+  'org.freedesktop.secrets: secret-service support for applications'
+  'swaybg: suggested Wayland wallpaper utility'
+  'swaylock: suggested Wayland screen locker'
+  'waybar: suggested status bar'
+  'xwayland-satellite: X11 application support through XWayland'
+  'xdg-desktop-portal-gtk: suggested desktop portal'
+  'xdg-desktop-portal-gnome: desktop portal required for screencasting'
+)
+provides=(
+  "niri=${pkgver}"
+  'wayland-compositor'
+)
+conflicts=('niri')
+source=()
+b2sums=()
+
+build() {
+  cd "${NIRI_SRC}"
+  export CARGO_HOME="${srcdir}/cargo"
+  export NIRI_BUILD_COMMIT="${NIRI_COMMIT}"
+  export NIRI_BUILD_VERSION_STRING="${pkgver}-${pkgrel}-mica (${NIRI_BUILD_COMMIT})"
+
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  cargo build --frozen --release
+
+  target/release/niri completions bash > "${srcdir}/niri.bash"
+  target/release/niri completions fish > "${srcdir}/niri.fish"
+  target/release/niri completions zsh > "${srcdir}/_niri"
+}
+
+package() {
+  cd "${NIRI_SRC}"
+
+  install -Dm755 target/release/niri "${pkgdir}/usr/bin/niri"
+  install -Dm755 resources/niri-session "${pkgdir}/usr/bin/niri-session"
+
+  install -Dm644 resources/niri.service \
+    "${pkgdir}/usr/lib/systemd/user/niri.service"
+  install -Dm644 resources/niri-shutdown.target \
+    "${pkgdir}/usr/lib/systemd/user/niri-shutdown.target"
+  install -Dm644 resources/niri.desktop \
+    "${pkgdir}/usr/share/wayland-sessions/niri.desktop"
+  install -Dm644 resources/niri-portals.conf \
+    "${pkgdir}/usr/share/xdg-desktop-portal/niri-portals.conf"
+
+  install -Dm644 "${srcdir}/niri.bash" \
+    "${pkgdir}/usr/share/bash-completion/completions/niri"
+  install -Dm644 "${srcdir}/niri.fish" \
+    "${pkgdir}/usr/share/fish/vendor_completions.d/niri.fish"
+  install -Dm644 "${srcdir}/_niri" \
+    "${pkgdir}/usr/share/zsh/site-functions/_niri"
+
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/niri/README.md"
+  install -Dm644 resources/default-config.kdl \
+    "${pkgdir}/usr/share/doc/niri/default-config.kdl"
+}

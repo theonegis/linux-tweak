@@ -1,0 +1,36 @@
+[general]
+live_config_reload = true
+
+[colors]
+transparent_background_colors = true
+
+[font]
+size = 14
+
+[font.offset]
+x = 0
+y = 8
+
+[font.normal]
+family = "JetBrainsMono Nerd Font Mono"
+style = "Regular"
+
+[window]
+decorations = "None"
+opacity = 0.65
+blur = true
+dynamic_padding = true
+startup_mode = "windowed"
+dynamic_title = true
+
+[window.padding]
+x = 10
+y = 8
+
+[keyboard]
+bindings = [
+    { key = "C", mods = "Control|Shift", action = "Copy" },
+    { key = "V", mods = "Control|Shift", action = "Paste" },
+    { key = "F", mods = "Control|Shift", mode = "~Search", action = "SearchForward"},
+    { key = "B", mods = "Control|Shift", mode = "~Search", action = "SearchBackward"},
+]

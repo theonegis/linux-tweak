@@ -9,7 +9,7 @@ size = 14
 
 [font.offset]
 x = 0
-y = 8
+y = 0
 
 [font.normal]
 family = "JetBrainsMono Nerd Font Mono"
@@ -17,7 +17,7 @@ style = "Regular"
 
 [window]
 decorations = "None"
-opacity = 0.65
+opacity = 0.75
 blur = true
 dynamic_padding = true
 startup_mode = "windowed"

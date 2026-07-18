@@ -1,0 +1,328 @@
+From 8f6b58d5dc73e72c7642acd77a498f212cc116ef Mon Sep 17 00:00:00 2001
+From: Tanzhenyu <tanzhenyu@localhost>
+Date: Tue, 14 Jul 2026 10:00:00 +0800
+Subject: [PATCH] ui: style text overlays as light acrylic
+
+Use Inter throughout the native text information overlays and replace the
+opaque square panels with lightly translucent, cool-grey rounded surfaces.
+The gradient, highlight border and fine deterministic grain approximate an
+acrylic material while keeping the implementation in niri's existing Cairo
+texture path.
+---
+ src/ui/hotkey_overlay.rs | 112 +++++++++++++++++++++++++++++++++++------
+ src/ui/mru.rs            | 111 +++++++++++++++++++++++++++++++++++------
+ 2 files changed, 188 insertions(+), 35 deletions(-)
+
+diff --git a/src/ui/hotkey_overlay.rs b/src/ui/hotkey_overlay.rs
+index 6afd642..f8fb868 100644
+--- a/src/ui/hotkey_overlay.rs
++++ b/src/ui/hotkey_overlay.rs
+@@ -25,8 +25,9 @@
+-const PADDING: i32 = 8;
++const PADDING: i32 = 18;
+ // const MARGIN: i32 = PADDING * 2;
+-const FONT: &str = "sans 14px";
+-const BORDER: i32 = 4;
+-const LINE_INTERVAL: i32 = 2;
++const FONT: &str = "Inter 14px";
++const BORDER: i32 = 1;
++const CORNER_RADIUS: f64 = 18.;
++const LINE_INTERVAL: i32 = 6;
+ const TITLE: &str = "Important Hotkeys";
+ 
+ pub struct HotkeyOverlay {
+@@ -303,6 +304,91 @@ fn key_name(key: &Key) -> String {
+     }
+ }
+ 
++fn rounded_rectangle(cr: &cairo::Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
++    let radius = radius.min(width / 2.).min(height / 2.);
++    let x2 = x + width;
++    let y2 = y + height;
++
++    cr.new_sub_path();
++    cr.arc(
++        x2 - radius,
++        y + radius,
++        radius,
++        -std::f64::consts::FRAC_PI_2,
++        0.,
++    );
++    cr.arc(
++        x2 - radius,
++        y2 - radius,
++        radius,
++        0.,
++        std::f64::consts::FRAC_PI_2,
++    );
++    cr.arc(
++        x + radius,
++        y2 - radius,
++        radius,
++        std::f64::consts::FRAC_PI_2,
++        std::f64::consts::PI,
++    );
++    cr.arc(
++        x + radius,
++        y + radius,
++        radius,
++        std::f64::consts::PI,
++        std::f64::consts::PI * 1.5,
++    );
++    cr.close_path();
++}
++
++fn paint_acrylic_panel(
++    cr: &cairo::Context,
++    width: i32,
++    height: i32,
++    scale: f64,
++) -> Result<(), cairo::Error> {
++    let width = f64::from(width);
++    let height = f64::from(height);
++    let radius = CORNER_RADIUS * scale;
++
++    rounded_rectangle(cr, 0., 0., width, height, radius);
++    let background = cairo::LinearGradient::new(0., 0., 0., height);
++    background.add_color_stop_rgba(0., 0.965, 0.970, 0.980, 0.90);
++    background.add_color_stop_rgba(1., 0.845, 0.855, 0.875, 0.86);
++    cr.set_source(&background)?;
++    cr.fill()?;
++
++    // Add restrained, deterministic grain to keep the surface from looking flat.
++    cr.save()?;
++    rounded_rectangle(cr, 0., 0., width, height, radius);
++    cr.clip();
++    let step = (6. * scale).round().max(5.) as usize;
++    cr.set_source_rgba(1., 1., 1., 0.035);
++    for y in (0..height as usize).step_by(step) {
++        for x in (0..width as usize).step_by(step) {
++            if (x / step + y / step) % 3 == 0 {
++                cr.rectangle(x as f64, y as f64, scale.max(1.), scale.max(1.));
++            }
++        }
++    }
++    cr.fill()?;
++    cr.restore()?;
++
++    let border_width = (f64::from(BORDER) * scale).round().max(1.);
++    let inset = border_width / 2.;
++    rounded_rectangle(
++        cr,
++        inset,
++        inset,
++        width - border_width,
++        height - border_width,
++        radius - inset,
++    );
++    cr.set_source_rgba(1., 1., 1., 0.78);
++    cr.set_line_width(border_width);
++    cr.stroke()
++}
++
+ fn render(
+     renderer: &mut GlesRenderer,
+     config: &Config,
+@@ -369,7 +455,7 @@ fn render(
+ 
+     let attrs = AttrList::new();
+-    attrs.insert(AttrString::new_family("Monospace"));
+-    attrs.insert(AttrColor::new_background(12000, 12000, 12000));
++    attrs.insert(AttrString::new_family("Inter"));
++    attrs.insert(AttrColor::new_background(57000, 57500, 58500));
+ 
+     for (trigger, action) in &entries {
+         let text = trigger.to_string_with_mod(mod_key);
+@@ -407,15 +493,14 @@ fn render(
+ 
+     let surface = ImageSurface::create(cairo::Format::ARgb32, width, height)?;
+     let cr = cairo::Context::new(&surface)?;
+-    cr.set_source_rgb(0.1, 0.1, 0.1);
+-    cr.paint()?;
++    paint_acrylic_panel(&cr, width, height, scale)?;
+ 
+     cr.move_to(padding.into(), padding.into());
+     let layout = pangocairo::functions::create_layout(&cr);
+     layout.context().set_round_glyph_positions(false);
+     layout.set_font_description(Some(&font));
+ 
+-    cr.set_source_rgb(1., 1., 1.);
++    cr.set_source_rgb(0.08, 0.09, 0.11);
+ 
+     cr.move_to(((width - title_size.0) / 2).into(), padding.into());
+     layout.set_attributes(Some(&bold));
+@@ -444,15 +529,6 @@ fn render(
+         cr.rel_move_to(0., f64::from(line_interval));
+     }
+ 
+-    cr.move_to(0., 0.);
+-    cr.line_to(width.into(), 0.);
+-    cr.line_to(width.into(), height.into());
+-    cr.line_to(0., height.into());
+-    cr.line_to(0., 0.);
+-    cr.set_source_rgb(0.5, 0.8, 1.0);
+-    // Keep the border width even to avoid blurry edges.
+-    cr.set_line_width((f64::from(BORDER) / 2. * scale).round() * 2.);
+-    cr.stroke()?;
+     drop(cr);
+ 
+     let data = surface.take_data().unwrap();
+diff --git a/src/ui/mru.rs b/src/ui/mru.rs
+index a7b5528..bd9b13e 100644
+--- a/src/ui/mru.rs
++++ b/src/ui/mru.rs
+@@ -62,14 +62,17 @@ const MOUSE_MOVEMENT_THRESHOLD: f64 = 10.;
+ /// Padding in the scope indication panel.
+-const PANEL_PADDING: i32 = 12;
++const PANEL_PADDING: i32 = 16;
+ 
+ /// Border size of the scope indication panel.
+-const PANEL_BORDER: i32 = 4;
++const PANEL_BORDER: i32 = 1;
++
++/// Corner radius of the scope indication panel.
++const PANEL_CORNER_RADIUS: f64 = 16.;
+ 
+ /// Backdrop color behind the previews.
+ const BACKDROP_COLOR: Color32F = Color32F::new(0., 0., 0., 0.8);
+ 
+ /// Font used to render the window titles.
+-const FONT: &str = "sans 14px";
++const FONT: &str = "Inter 14px";
+ 
+ /// Scopes in the order they are cycled through.
+ static SCOPE_CYCLE: [MruScope; 3] = [MruScope::All, MruScope::Workspace, MruScope::Output];
+@@ -1724,8 +1727,8 @@ fn generate_scope_panels(
+ ) -> anyhow::Result<[MruTexture; 3]> {
+     fn make_panel_text(idx: usize) -> String {
+-        let span_unselected = "<span fgcolor='#999999'>";
++        let span_unselected = "<span fgcolor='#545860'>";
+         let span_end = "</span>";
+-        let span_shortcut = "<span face='mono' bgcolor='#2C2C2C' letter_spacing='5000'><b>";
++        let span_shortcut = "<span face='Inter' weight='600' fgcolor='#24262A' bgcolor='#D4D7DC' letter_spacing='5000'><b>";
+         let span_shortcut_end = "</b></span>";
+ 
+         // Starts with a zero-width space to make letter_spacing work on the left.
+@@ -1759,6 +1762,90 @@ fn generate_scope_panels(
+     ])
+ }
+ 
++fn rounded_rectangle(cr: &cairo::Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
++    let radius = radius.min(width / 2.).min(height / 2.);
++    let x2 = x + width;
++    let y2 = y + height;
++
++    cr.new_sub_path();
++    cr.arc(
++        x2 - radius,
++        y + radius,
++        radius,
++        -std::f64::consts::FRAC_PI_2,
++        0.,
++    );
++    cr.arc(
++        x2 - radius,
++        y2 - radius,
++        radius,
++        0.,
++        std::f64::consts::FRAC_PI_2,
++    );
++    cr.arc(
++        x + radius,
++        y2 - radius,
++        radius,
++        std::f64::consts::FRAC_PI_2,
++        std::f64::consts::PI,
++    );
++    cr.arc(
++        x + radius,
++        y + radius,
++        radius,
++        std::f64::consts::PI,
++        std::f64::consts::PI * 1.5,
++    );
++    cr.close_path();
++}
++
++fn paint_acrylic_panel(
++    cr: &cairo::Context,
++    width: i32,
++    height: i32,
++    scale: f64,
++) -> Result<(), cairo::Error> {
++    let width = f64::from(width);
++    let height = f64::from(height);
++    let radius = PANEL_CORNER_RADIUS * scale;
++
++    rounded_rectangle(cr, 0., 0., width, height, radius);
++    let background = cairo::LinearGradient::new(0., 0., 0., height);
++    background.add_color_stop_rgba(0., 0.965, 0.970, 0.980, 0.90);
++    background.add_color_stop_rgba(1., 0.845, 0.855, 0.875, 0.86);
++    cr.set_source(&background)?;
++    cr.fill()?;
++
++    cr.save()?;
++    rounded_rectangle(cr, 0., 0., width, height, radius);
++    cr.clip();
++    let step = (6. * scale).round().max(5.) as usize;
++    cr.set_source_rgba(1., 1., 1., 0.035);
++    for y in (0..height as usize).step_by(step) {
++        for x in (0..width as usize).step_by(step) {
++            if (x / step + y / step) % 3 == 0 {
++                cr.rectangle(x as f64, y as f64, scale.max(1.), scale.max(1.));
++            }
++        }
++    }
++    cr.fill()?;
++    cr.restore()?;
++
++    let border_width = (f64::from(PANEL_BORDER) * scale).round().max(1.);
++    let inset = border_width / 2.;
++    rounded_rectangle(
++        cr,
++        inset,
++        inset,
++        width - border_width,
++        height - border_width,
++        radius - inset,
++    );
++    cr.set_source_rgba(1., 1., 1., 0.78);
++    cr.set_line_width(border_width);
++    cr.stroke()
++}
++
+ fn render_panel(renderer: &mut GlesRenderer, scale: f64, text: &str) -> anyhow::Result<MruTexture> {
+     let _span = tracy_client::span!("mru::render_panel");
+ 
+@@ -1787,8 +1874,7 @@ fn render_panel(renderer: &mut GlesRenderer, scale: f64, text: &str) -> anyhow:
+ 
+     let surface = ImageSurface::create(cairo::Format::ARgb32, width, height)?;
+     let cr = cairo::Context::new(&surface)?;
+-    cr.set_source_rgb(0.1, 0.1, 0.1);
+-    cr.paint()?;
++    paint_acrylic_panel(&cr, width, height, scale)?;
+ 
+     let padding = f64::from(padding);
+ 
+@@ -1801,18 +1887,9 @@ fn render_panel(renderer: &mut GlesRenderer, scale: f64, text: &str) -> anyhow:
+     layout.set_font_description(Some(&font));
+     layout.set_markup(text);
+ 
+-    cr.set_source_rgb(1., 1., 1.);
++    cr.set_source_rgb(0.08, 0.09, 0.11);
+     pangocairo::functions::show_layout(&cr, &layout);
+ 
+-    cr.move_to(0., 0.);
+-    cr.line_to(width.into(), 0.);
+-    cr.line_to(width.into(), height.into());
+-    cr.line_to(0., height.into());
+-    cr.line_to(0., 0.);
+-    cr.set_source_rgb(0.5, 0.5, 0.5);
+-    cr.set_line_width((f64::from(PANEL_BORDER) / 2. * scale).round() * 2.);
+-    cr.stroke()?;
+-
+     drop(cr);
+     let data = surface.take_data().unwrap();
+     let buffer = TextureBuffer::from_memory(
+-- 
+2.50.1

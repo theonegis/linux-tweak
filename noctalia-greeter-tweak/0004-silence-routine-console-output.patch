@@ -1,0 +1,292 @@
+From 6a9dd2f94560c4bd14832c7a2fa8e3c51a60f91d Mon Sep 17 00:00:00 2001
+From: Tanzhenyu <tanzhenyu@localhost>
+Date: Mon, 20 Jul 2026 00:30:00 +0800
+Subject: [PATCH 4/4] greeter: keep routine logs off the handoff VT
+
+Writing a clear sequence and routine diagnostics before the compositor owns
+DRM forces the deferred framebuffer console to become visible.  INFO output
+then remains in the VT buffer and flashes again when DRM is handed to the user
+compositor.
+
+Default the session, greeter and wlroots console thresholds to errors only.
+Explicit file logging continues to retain all greeter levels, and the previous
+verbosity can be restored with NOCTALIA_GREETER_LOG_LEVEL=info and
+WLR_LOG=info.  Move the VT clear to immediately after the backend has entered
+graphics mode, where it blanks the hidden buffer without producing a visible
+text frame.  Errors written after that point remain available at the next text
+handoff.
+---
+ scripts/noctalia-greeter-session     | 56 ++++++++++++++++++-----------
+ src/compositor/noctalia_compositor.c | 25 +++++++++++--
+ src/core/log.cpp                     | 70 ++++++++++++++++++++++++++++++++----
+ 3 files changed, 122 insertions(+), 29 deletions(-)
+
+diff --git a/scripts/noctalia-greeter-session b/scripts/noctalia-greeter-session
+index 98e49fb..8ee4f04 100755
+--- a/scripts/noctalia-greeter-session
++++ b/scripts/noctalia-greeter-session
+@@ -1,14 +1,6 @@
+ #!/usr/bin/env sh
+ set -eu
+ 
+-# The greeter and the user compositor must hand DRM ownership to each other.
+-# Keep boot diagnostics retained by the underlying Linux VT from becoming
+-# visible during that short handoff. /dev/tty is the greetd session's
+-# controlling terminal; leave non-VT and test environments untouched.
+-if [ -w /dev/tty ]; then
+-  printf '\033[H\033[2J\033[3J' > /dev/tty 2>/dev/null || :
+-fi
+-
+ _session_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ GREETER_BIN="${NOCTALIA_GREETER_BIN:-${_session_dir}/noctalia-greeter}"
+ COMPOSITOR_BIN="${NOCTALIA_GREETER_COMPOSITOR_BIN:-${_session_dir}/noctalia-greeter-compositor}"
+@@ -35,11 +27,35 @@ else
+   unset NOCTALIA_GREETER_LOG
+ fi
+ 
+-echo "=== noctalia-greeter-session $(date -Iseconds) pid=$$ uid=$(id -u) euid=$(id -u -r 2>/dev/null || id -u) ==="
+-echo "GREETER_BIN=${GREETER_BIN}"
+-echo "COMPOSITOR_BIN=${COMPOSITOR_BIN}"
+-echo "NOCTALIA_GREETER_LOG=${NOCTALIA_GREETER_LOG:-stderr (no file)}"
+-echo "GREETD_SOCK=${GREETD_SOCK:-unset}"
++_show_info=0
++_show_warning=0
++case "${NOCTALIA_GREETER_LOG_LEVEL:-error}" in
++debug | DEBUG | info | INFO)
++  _show_info=1
++  _show_warning=1
++  ;;
++warn | WARN | warning | WARNING)
++  _show_warning=1
++  ;;
++esac
++if [ "${_file_logging}" -eq 1 ]; then
++  _show_info=1
++  _show_warning=1
++fi
++
++log_info() {
++  [ "${_show_info}" -eq 1 ] && printf '%s\n' "$*" || :
++}
++
++log_warning() {
++  [ "${_show_warning}" -eq 1 ] && printf 'warn: %s\n' "$*" >&2 || :
++}
++
++log_info "=== noctalia-greeter-session $(date -Iseconds) pid=$$ uid=$(id -u) euid=$(id -u -r 2>/dev/null || id -u) ==="
++log_info "GREETER_BIN=${GREETER_BIN}"
++log_info "COMPOSITOR_BIN=${COMPOSITOR_BIN}"
++log_info "NOCTALIA_GREETER_LOG=${NOCTALIA_GREETER_LOG:-stderr (no file)}"
++log_info "GREETD_SOCK=${GREETD_SOCK:-unset}"
+ 
+ _pam_runtime="${XDG_RUNTIME_DIR:-unset}"
+ XDG_RUNTIME_DIR="/tmp/noctalia-runtime-$(id -u)"
+@@ -47,25 +63,25 @@ export XDG_RUNTIME_DIR
+ mkdir -p "${XDG_RUNTIME_DIR}"
+ chmod 700 "${XDG_RUNTIME_DIR}"
+ 
+-echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (pam=${_pam_runtime})"
+-echo "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}"
++log_info "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR} (pam=${_pam_runtime})"
++log_info "WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}"
+ 
+ unset WAYLAND_DISPLAY
+ 
+ if [ ! -x "${COMPOSITOR_BIN}" ]; then
+-  echo "error: compositor binary not found at ${COMPOSITOR_BIN}"
++  echo "error: compositor binary not found at ${COMPOSITOR_BIN}" >&2
+   exit 1
+ fi
+ 
+ if [ ! -x "${GREETER_BIN}" ]; then
+-  echo "error: greeter binary not found at ${GREETER_BIN}"
++  echo "error: greeter binary not found at ${GREETER_BIN}" >&2
+   exit 1
+ fi
+ 
+ export GREETER_BIN
+-export WLR_LOG="${WLR_LOG:-info}"
++export WLR_LOG="${WLR_LOG:-error}"
+ 
+-echo "launch: ${COMPOSITOR_BIN} -- $*"
++log_info "launch: ${COMPOSITOR_BIN} -- $*"
+ if command -v dbus-run-session >/dev/null 2>&1; then
+   if [ "${_file_logging}" -eq 1 ]; then
+     exec dbus-run-session -- env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
+@@ -80,7 +96,7 @@ if command -v dbus-run-session >/dev/null 2>&1; then
+     "${COMPOSITOR_BIN}" -- "$@"
+ fi
+ 
+-echo "warn: dbus-run-session not found; starting compositor without a session bus."
++log_warning "dbus-run-session not found; starting compositor without a session bus."
+ if [ "${_file_logging}" -eq 1 ]; then
+   exec env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
+     GREETER_BIN="${GREETER_BIN}" \
+diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
+index 21fe33c..9e068d3 100644
+--- a/src/compositor/noctalia_compositor.c
++++ b/src/compositor/noctalia_compositor.c
+@@ -1844,6 +1844,23 @@ static void clear_controlling_vt(void) {
+   fclose(tty);
+ }
+ 
++static enum wlr_log_importance configured_wlr_log_level(void) {
++  const char* level = getenv("WLR_LOG");
++  if (level == NULL || level[0] == '\0' || strcmp(level, "error") == 0) {
++    return WLR_ERROR;
++  }
++  if (strcmp(level, "silent") == 0 || strcmp(level, "none") == 0) {
++    return WLR_SILENT;
++  }
++  if (strcmp(level, "debug") == 0) {
++    return WLR_DEBUG;
++  }
++  if (strcmp(level, "info") == 0) {
++    return WLR_INFO;
++  }
++  return WLR_ERROR;
++}
++
+ static void cleanup_server_listeners(struct greeter_server* server) {
+   server->shutting_down = true;
+   remove_listener_if_set(&server->new_output);
+@@ -1883,7 +1900,7 @@ static void cleanup_server_listeners(struct greeter_server* server) {
+ }
+ 
+ int main(int argc, char** argv) {
+-  wlr_log_init(WLR_INFO, NULL);
++  wlr_log_init(configured_wlr_log_level(), NULL);
+ 
+   struct greeter_server server = {0};
+   server.idle_timerfd = -1;
+@@ -2010,6 +2027,11 @@ int main(int argc, char** argv) {
+     return 1;
+   }
+ 
++  // DRM is now in graphics mode, so blanking the retained VT cannot flash.
++  // Any real error written after this point remains available for the next
++  // text-mode handoff instead of being erased after DRM has been released.
++  clear_controlling_vt();
++
+   if (server.session != NULL) {
+     server.session_active.notify = handle_session_active;
+     wl_signal_add(&server.session->events.active, &server.session_active);
+@@ -2063,6 +2085,5 @@ int main(int argc, char** argv) {
+   cleanup_server_listeners(&server);
+   wl_display_destroy_clients(server.display);
+   wl_display_destroy(server.display);
+-  clear_controlling_vt();
+   return 0;
+ }
+diff --git a/src/core/log.cpp b/src/core/log.cpp
+index 7254c5f..3ad7b9c 100644
+--- a/src/core/log.cpp
++++ b/src/core/log.cpp
+@@ -27,6 +27,52 @@ namespace {
+   bool g_fileLogging = false;
+   bool g_loggingInitialized = false;
+ 
++  [[nodiscard]] int logLevelRank(std::string_view level) {
++    if (level == "error") {
++      return 0;
++    }
++    if (level == "warn" || level == "warning") {
++      return 1;
++    }
++    if (level == "info") {
++      return 2;
++    }
++    return 3;
++  }
++
++  [[nodiscard]] int configuredConsoleLogLevel() {
++    static const int level = [] {
++      const char* configured = std::getenv("NOCTALIA_GREETER_LOG_LEVEL");
++      if (configured == nullptr || configured[0] == '\0') {
++        return 0;
++      }
++
++      std::string lowered;
++      lowered.reserve(std::strlen(configured));
++      for (const char* p = configured; *p != '\0'; ++p) {
++        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*p))));
++      }
++      if (lowered == "silent" || lowered == "none") {
++        return -1;
++      }
++      if (lowered == "warn" || lowered == "warning") {
++        return 1;
++      }
++      if (lowered == "info") {
++        return 2;
++      }
++      if (lowered == "debug") {
++        return 3;
++      }
++      return 0;
++    }();
++    return level;
++  }
++
++  [[nodiscard]] bool shouldWriteToConsole(std::string_view level) {
++    return logLevelRank(level) <= configuredConsoleLogLevel();
++  }
++
+   void emergencyWrite(int fd, const void* data, std::size_t size) {
+     [[maybe_unused]] const ssize_t written = ::write(fd, data, size);
+   }
+@@ -90,8 +136,10 @@ namespace {
+ 
+     FILE* file = std::fopen(path, "a");
+     if (file == nullptr) {
+-      std::fprintf(stderr, "[warn] [log] cannot open '%s': %s\n", path, std::strerror(errno));
+-      std::fflush(stderr);
++      if (shouldWriteToConsole("warn")) {
++        std::fprintf(stderr, "[warn] [log] cannot open '%s': %s\n", path, std::strerror(errno));
++        std::fflush(stderr);
++      }
+       return false;
+     }
+ 
+@@ -155,7 +203,9 @@ void emergencyLogBootstrap(int argc, char* argv[]) {
+   const std::string line = msg.str();
+   const char* text = line.c_str();
+ 
+-  emergencyWrite(STDERR_FILENO, text, line.size());
++  if (shouldWriteToConsole("info")) {
++    emergencyWrite(STDERR_FILENO, text, line.size());
++  }
+ 
+   // Only touch files when file logging is explicitly configured.
+   if (const char* path = configuredLogFilePath()) {
+@@ -176,9 +226,13 @@ void initLogging() {
+ 
+   if (g_fileLogging) {
+     if (!g_logPaths.empty()) {
+-      std::fprintf(stderr, "[info] [log] writing to: %s\n", g_logPaths.c_str());
++      if (shouldWriteToConsole("info")) {
++        std::fprintf(stderr, "[info] [log] writing to: %s\n", g_logPaths.c_str());
++      }
+     } else {
+-      std::fprintf(stderr, "[warn] [log] NOCTALIA_GREETER_LOG is set but no log file could be opened\n");
++      if (shouldWriteToConsole("warn")) {
++        std::fprintf(stderr, "[warn] [log] NOCTALIA_GREETER_LOG is set but no log file could be opened\n");
++      }
+     }
+     std::fflush(stderr);
+   }
+@@ -204,8 +258,10 @@ static void writeLogLine(std::string_view tag, std::string_view level, std::stri
+   oss << '[' << level << "] [" << tag << "] " << message << '\n';
+ 
+   const std::string line = oss.str();
+-  std::fputs(line.c_str(), stderr);
+-  std::fflush(stderr);
++  if (shouldWriteToConsole(level)) {
++    std::fputs(line.c_str(), stderr);
++    std::fflush(stderr);
++  }
+ 
+   for (FILE* file : g_logFiles) {
+     std::fputs(line.c_str(), file);
+-- 
+2.50.1

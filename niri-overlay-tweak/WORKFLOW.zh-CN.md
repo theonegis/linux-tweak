@@ -21,7 +21,7 @@ sudo pacman -S --needed base-devel git rust clang inter-font
 然后执行：
 
 ```bash
-cd /home/tanzhenyu/Developer/niri-overlay-acrylic
+cd /home/tanzhenyu/Developer/linux-tweak/niri-overlay-tweak
 ./update-build-install.sh
 ```
 
@@ -30,13 +30,23 @@ cd /home/tanzhenyu/Developer/niri-overlay-acrylic
 1. 将上游仓库克隆到 `niri-src`；
 2. 找到版本号最高的稳定 release tag；
 3. 将源码重置到该 tag；
-4. 修改 `src/ui/mru.rs`、`src/ui/screenshot_ui.rs` 和 `src/ui/hotkey_overlay.rs`；
-5. 构建 `niri-acrylic-版本-1-x86_64.pkg.tar.zst`；
+4. 修改三个 overlay UI 源文件，并在上游仍保留相应原始命令时，修正
+   `resources/niri-session` 的环境导入并在启动 niri 前清空 Linux VT；
+5. 构建 `niri-版本-1.3-x86_64.pkg.tar.zst`；
 6. 使用 `sudo pacman -U` 安装。
 
-第一次安装时，pacman 会提示 `niri` 与 `niri-acrylic` 冲突。确认移除仓库
-中的 `niri` 即可；`niri-acrylic` 已提供 `niri` 和 `wayland-compositor`。
-安装完成后注销并重新登录。
+新的自定义包使用仓库包同名的 `niri`。从旧的 `niri-acrylic`
+第一次迁移时，pacman 会提示替换冲突包，确认即可。安装完成后注销
+并重新登录。
+
+因为已安装包的真实名称是 `niri`，仓库之后出现更高版本时，
+`paru -Syu`/`pacman -Syu` 会正常用官方包覆盖它。官方更新后如果要
+恢复自定义 overlay，再运行本脚本；脚本会在最新稳定 tag 上重新
+应用修改并安装同名的 `niri` 包。
+
+本地 `pkgrel` 使用 `1.3`，以避免被 CachyOS 当前同源码版本的
+`1.1` 优化包立即覆盖。这不会阻止更高 `pkgver` 的新 niri 版本，
+也不会阻止更高的仓库 `pkgrel`。
 
 如果只想编译包而暂时不安装：
 
@@ -57,7 +67,7 @@ NIRI_TAG=v26.04 ./update-build-install.sh
 仍然只需运行：
 
 ```bash
-cd /home/tanzhenyu/Developer/niri-overlay-acrylic
+cd /home/tanzhenyu/Developer/linux-tweak/niri-overlay-tweak
 ./update-build-install.sh
 ```
 
@@ -68,12 +78,20 @@ cd /home/tanzhenyu/Developer/niri-overlay-acrylic
 并且不会写入半成品。这时需要根据新版的 `mru.rs` 或
 `hotkey_overlay.rs` 或 `screenshot_ui.rs` 更新修改脚本。
 
+`niri-session` 修正是可选的精确匹配：如果检测到上游旧的环境导入
+命令，就显式传入当前环境里的所有变量名，以保留 niri 原有行为并
+避免 systemd 的弃用警告。如果仍检测到上游原始的
+`systemctl --user --wait start niri.service`，脚本还会在它之前清空
+编号 Linux VT 的当前画面和 scrollback；伪终端与嵌套会话不受影响。
+如果上游以后移除或改写相应命令，脚本会保留上游内容，不会猜测式
+替换。
+
 ## 分步手动执行
 
 下面是自动脚本所做工作的等价命令，便于排查：
 
 ```bash
-cd /home/tanzhenyu/Developer/niri-overlay-acrylic
+cd /home/tanzhenyu/Developer/linux-tweak/niri-overlay-tweak
 
 git clone https://github.com/niri-wm/niri.git niri-src
 git -C niri-src fetch --tags --prune origin
@@ -103,7 +121,7 @@ sudo pacman -U "$package_file"
 
 ```bash
 niri --version
-pacman -Q niri-acrylic
+pacman -Q niri
 ```
 
 回到官方仓库版本：
@@ -111,5 +129,3 @@ pacman -Q niri-acrylic
 ```bash
 sudo pacman -S niri
 ```
-
-pacman 会提示移除冲突的 `niri-acrylic`。

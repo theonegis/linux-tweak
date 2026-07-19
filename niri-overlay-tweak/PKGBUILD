@@ -1,8 +1,11 @@
 # Maintainer: Tanzhenyu <tanzhenyu@localhost>
 
-pkgname=niri-acrylic
+pkgname=niri
 pkgver=26.04
-pkgrel=1
+# CachyOS currently uses 1.1 for its optimized rebuild. Keep this local patch
+# one subrelease newer so it is not immediately replaced by the same source
+# version; any later upstream version or repository pkgrel still supersedes it.
+pkgrel=1.2
 pkgdesc='Niri with light-grey acrylic native text information overlays'
 arch=('x86_64')
 url='https://github.com/YaLTeR/niri'
@@ -44,11 +47,10 @@ optdepends=(
   'xdg-desktop-portal-gtk: suggested desktop portal'
   'xdg-desktop-portal-gnome: desktop portal required for screencasting'
 )
-provides=(
-  "niri=${pkgver}"
-  'wayland-compositor'
-)
-conflicts=('niri')
+provides=('wayland-compositor')
+# Allow a one-time clean transition from the old custom package name.
+conflicts=('niri-acrylic')
+replaces=('niri-acrylic')
 source=(
   "niri-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz"
   '0001-style-text-overlays-as-light-acrylic.patch'

@@ -12,6 +12,16 @@ appearance for its native text information overlays:
 - the screenshot UI help panel;
 - the `Important Hotkeys` overlay.
 
+It also conditionally replaces niri's deprecated no-argument
+`systemctl --user import-environment` session command with an explicit list of
+the current environment variable names. This preserves niri's blanket-import
+compatibility while suppressing the systemd deprecation warning. If upstream
+removes or rewrites that command, the transformation leaves it untouched.
+Immediately before the systemd-managed niri service starts, it also clears
+retained text from a numbered Linux virtual terminal. Pseudo-terminals and
+nested sessions are deliberately left untouched. This second session change is
+also conditional on niri's exact upstream service-start command.
+
 The transformation uses Inter 15 px, black text, 24 px horizontal and 18 px
 vertical padding, a lightly translucent pale-blue-to-pale-green Mica gradient,
 a subtle environmental highlight, a fine inner border, and 16–18 px rounded
@@ -24,14 +34,16 @@ user:
 
 ```sh
 sudo pacman -S --needed base-devel
-cd /home/tanzhenyu/Developer/niri-overlay-acrylic
+cd /home/tanzhenyu/Developer/linux-tweak/niri-overlay-tweak
 ./update-build-install.sh
 ```
 
-`niri-acrylic` provides and conflicts with `niri`, so pacman will ask to
-replace the installed repository package. Log out and log back in after the
-installation; restarting niri from inside the current graphical session is
-not recommended.
+The custom package is deliberately named `niri`, just like the repository
+package. This lets a later, higher-version repository package replace it during
+a normal system upgrade. The package also replaces the legacy custom package
+name `niri-acrylic` during the one-time transition. Log out and log back in
+after installation; restarting niri from inside the current graphical session
+is not recommended.
 
 ## Adjust the look
 
@@ -51,10 +63,11 @@ Run `./update-build-install.sh` again after changing the transformation.
 For a new stable niri release, run:
 
 ```sh
-cd /home/tanzhenyu/Developer/niri-overlay-acrylic
+cd /home/tanzhenyu/Developer/linux-tweak/niri-overlay-tweak
 ./update-build-install.sh
 ```
 
-The script selects the latest stable tag and applies the transformation
+The script selects the latest stable tag and applies the UI transformation
 strictly. If upstream changes one of the three UI files, it stops before
-writing partial changes so the matching anchors can be updated safely.
+writing partial changes so the matching anchors can be updated safely. The
+`niri-session` compatibility fixes are conditional and idempotent.

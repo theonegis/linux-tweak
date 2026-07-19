@@ -1,0 +1,47 @@
+From 0d1c80dc19f2ac52dc3480d521924c5d721d9a39 Mon Sep 17 00:00:00 2001
+From: Tanzhenyu <tanzhenyu@localhost>
+Date: Sun, 19 Jul 2026 22:30:00 +0800
+Subject: [PATCH 3/3] compositor: clear the VT immediately after DRM release
+
+The session script clears the VT before starting the greeter, but system
+services can write more diagnostics to the underlying console while the
+greeter is running.  Those later messages become visible when the greeter
+releases DRM for the user compositor.
+
+Clear the controlling VT after wl_display_destroy() has synchronously torn
+down the wlroots backend.  This places the clear at the actual handoff instead
+of several seconds before it.
+---
+ src/compositor/noctalia_compositor.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
+index 67645c0..5653521 100644
+--- a/src/compositor/noctalia_compositor.c
++++ b/src/compositor/noctalia_compositor.c
+@@ -1834,6 +1834,16 @@ static void remove_listener_if_set(struct wl_listener* listener) {
+   }
+ }
+ 
++static void clear_controlling_vt(void) {
++  FILE* tty = fopen("/dev/tty", "w");
++  if (tty == NULL) {
++    return;
++  }
++  fputs("\033[H\033[2J\033[3J", tty);
++  fflush(tty);
++  fclose(tty);
++}
++
+ static void cleanup_server_listeners(struct greeter_server* server) {
+   server->shutting_down = true;
+   remove_listener_if_set(&server->new_output);
+@@ -2053,5 +2063,6 @@ int main(int argc, char** argv) {
+   cleanup_server_listeners(&server);
+   wl_display_destroy_clients(server.display);
+   wl_display_destroy(server.display);
++  clear_controlling_vt();
+   return 0;
+ }
+-- 
+2.50.1

@@ -1,11 +1,10 @@
-pkgbase = niri-acrylic
+pkgbase = niri
 	pkgdesc = Niri with light-grey acrylic native text information overlays
 	pkgver = 26.04
-	pkgrel = 1
+	pkgrel = 1.2
 	url = https://github.com/YaLTeR/niri
 	arch = x86_64
 	license = GPL-3.0-or-later
-	options = !lto
 	makedepends = clang
 	makedepends = rust
 	depends = cairo
@@ -34,12 +33,13 @@ pkgbase = niri-acrylic
 	optdepends = xwayland-satellite: X11 application support through XWayland
 	optdepends = xdg-desktop-portal-gtk: suggested desktop portal
 	optdepends = xdg-desktop-portal-gnome: desktop portal required for screencasting
-	provides = niri=26.04
 	provides = wayland-compositor
-	conflicts = niri
+	conflicts = niri-acrylic
+	replaces = niri-acrylic
+	options = !lto
 	source = niri-26.04.tar.gz::https://github.com/YaLTeR/niri/archive/refs/tags/v26.04.tar.gz
 	source = 0001-style-text-overlays-as-light-acrylic.patch
 	b2sums = 65fc4df85ab40c1a7a82900a9812c542a8a00467a0f1742f2dede50c0e323bd8957149e91b181a6c71ad077735f6a4db53451bbad0deb768f7d4840ebe798a20
 	b2sums = 595b6cdca0f4513ac2bff8b973dfe81902f68a5165595ce23e01adecd8699bd91033935154048bccb60b91abc7d1e3a4030505110fdb13d2e2b8749acfd91098
 
-pkgname = niri-acrylic
+pkgname = niri

@@ -1,0 +1,35 @@
+From 335f96cc3f4e422c3ce9badbf8695352dd3f2285 Mon Sep 17 00:00:00 2001
+From: Tanzhenyu <tanzhenyu@localhost>
+Date: Sun, 19 Jul 2026 22:01:00 +0800
+Subject: [PATCH 2/2] session: clear retained VT text before DRM handoff
+
+greetd and the greeter compositor run on a Linux virtual terminal.  When the
+greeter releases DRM before the user compositor acquires it, the text buffer
+underneath can become visible briefly.  Clear both the visible screen and the
+scrollback before entering graphics mode so the unavoidable handoff gap shows
+a blank VT rather than boot diagnostics.
+---
+ scripts/noctalia-greeter-session | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/scripts/noctalia-greeter-session b/scripts/noctalia-greeter-session
+index da2bf12..fc6b056 100755
+--- a/scripts/noctalia-greeter-session
++++ b/scripts/noctalia-greeter-session
+@@ -1,6 +1,14 @@
+ #!/usr/bin/env sh
+ set -eu
+ 
++# The greeter and the user compositor must hand DRM ownership to each other.
++# Keep boot diagnostics retained by the underlying Linux VT from becoming
++# visible during that short handoff. /dev/tty is the greetd session's
++# controlling terminal; leave non-VT and test environments untouched.
++if [ -w /dev/tty ]; then
++  printf '\033[H\033[2J\033[3J' > /dev/tty 2>/dev/null || :
++fi
++
+ _session_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ GREETER_BIN="${NOCTALIA_GREETER_BIN:-${_session_dir}/noctalia-greeter}"
+ COMPOSITOR_BIN="${NOCTALIA_GREETER_COMPOSITOR_BIN:-${_session_dir}/noctalia-greeter-compositor}"
+-- 
+2.50.1

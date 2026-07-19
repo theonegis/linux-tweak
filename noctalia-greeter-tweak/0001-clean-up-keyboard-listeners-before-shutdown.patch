@@ -1,0 +1,42 @@
+From 3ebbbfb48b8eaaf8d158cd80cbbf06e58f22f72f Mon Sep 17 00:00:00 2001
+From: Tanzhenyu <tanzhenyu@localhost>
+Date: Sun, 19 Jul 2026 22:00:00 +0800
+Subject: [PATCH 1/2] compositor: detach keyboard listeners before shutdown
+
+The keyboard wrappers own listeners attached to wlroots input devices.  They
+were left attached until wl_display_destroy(), allowing wlr_keyboard_finish()
+to call into the normal hot-unplug path while the server was already tearing
+down.  On wlroots 0.20 this corrupts the listener walk and crashes the greeter
+compositor during every successful login.
+
+Detach and free the wrappers together with the other server listeners.  The
+normal handle_keyboard_destroy() path remains unchanged for actual device
+hotplug while the greeter is running.
+---
+ src/compositor/noctalia_compositor.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
+index 57d5d86..e9ce5ab 100644
+--- a/src/compositor/noctalia_compositor.c
++++ b/src/compositor/noctalia_compositor.c
+@@ -1854,6 +1854,17 @@ static void cleanup_server_listeners(struct greeter_server* server) {
+   remove_listener_if_set(&server->request_set_selection);
+   remove_listener_if_set(&server->session_active);
+ 
++  wlr_seat_set_keyboard(server->seat, NULL);
++  struct greeter_keyboard* keyboard;
++  struct greeter_keyboard* keyboard_tmp;
++  wl_list_for_each_safe(keyboard, keyboard_tmp, &server->keyboards, link) {
++    wl_list_remove(&keyboard->modifiers.link);
++    wl_list_remove(&keyboard->key.link);
++    wl_list_remove(&keyboard->destroy.link);
++    wl_list_remove(&keyboard->link);
++    free(keyboard);
++  }
++
+   struct greeter_touch_point* point;
+   struct greeter_touch_point* tmp;
+   wl_list_for_each_safe(point, tmp, &server->touch_points, link) {
+-- 
+2.50.1

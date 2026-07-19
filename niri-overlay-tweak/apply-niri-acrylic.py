@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Apply the light-grey Mica style to a clean niri source tree.
+"""Apply the Mica style and local session fixes to niri.
 
 The transformation is intentionally strict: every expected upstream fragment
-must occur exactly once.  If a future niri release changes the relevant code,
-the script aborts before writing any source file.
+for the visual changes must occur exactly once. If a future niri release
+changes the relevant UI code, the script aborts before writing any source
+file. Session fixes are conditional and are skipped when their exact upstream
+anchors no longer exist.
 """
 
 from __future__ import annotations
@@ -12,6 +14,27 @@ import argparse
 import re
 import sys
 from pathlib import Path
+
+
+NIRI_SESSION_IMPORT_OLD = "    systemctl --user import-environment"
+NIRI_SESSION_IMPORT_NEW = (
+    "    systemctl --user import-environment "
+    "$(printenv | cut -d'=' -f1 | tr '\\n' ' ')"
+)
+NIRI_SESSION_START = "    systemctl --user --wait start niri.service"
+NIRI_SESSION_VT_CLEAR_MARKER = (
+    "    # Clear retained Linux VT text immediately before niri takes over."
+)
+NIRI_SESSION_VT_CLEAR_LINES = (
+    NIRI_SESSION_VT_CLEAR_MARKER,
+    "    # Leave pseudo-terminals and nested sessions untouched.",
+    '    case "$(tty 2>/dev/null)" in',
+    "    /dev/tty[0-9]*)",
+    "        printf '\\033[H\\033[2J\\033[3J' > /dev/tty 2>/dev/null || :",
+    "        ;;",
+    "    esac",
+    "",
+)
 
 
 HOTKEY_HELPERS = r'''
@@ -131,6 +154,115 @@ def sub_once(text: str, pattern: str, replacement: str, label: str) -> str:
     if count != 1:
         raise TransformError(f"{label}: expected exactly one match, found {count}")
     return updated
+
+
+def transform_niri_session_import(text: str) -> tuple[str, str]:
+    """Replace niri's deprecated blanket systemd environment import.
+
+    Passing every current variable name preserves niri's existing import-all
+    behaviour while avoiding systemd's no-argument deprecation warning. The
+    exact-line checks keep the transform idempotent and avoid guessing if
+    upstream changes the command independently.
+    """
+
+    lines = text.splitlines(keepends=True)
+    old_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip("\r\n") == NIRI_SESSION_IMPORT_OLD
+    ]
+    new_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip("\r\n") == NIRI_SESSION_IMPORT_NEW
+    ]
+
+    if len(old_indexes) > 1:
+        raise TransformError(
+            "niri-session environment import: expected at most one deprecated "
+            f"command, found {len(old_indexes)}"
+        )
+    if len(new_indexes) > 1:
+        raise TransformError(
+            "niri-session environment import: expected at most one replacement "
+            f"command, found {len(new_indexes)}"
+        )
+    if old_indexes and new_indexes:
+        raise TransformError(
+            "niri-session environment import: deprecated and replacement "
+            "commands are both active"
+        )
+    if new_indexes:
+        return text, "already-applied"
+    if not old_indexes:
+        return text, "not-needed"
+
+    index = old_indexes[0]
+    line = lines[index]
+    if line.endswith("\r\n"):
+        ending = "\r\n"
+    elif line.endswith("\n"):
+        ending = "\n"
+    elif line.endswith("\r"):
+        ending = "\r"
+    else:
+        ending = ""
+    lines[index] = NIRI_SESSION_IMPORT_NEW + ending
+    return "".join(lines), "applied"
+
+
+def transform_niri_session_vt_clear(text: str) -> tuple[str, str]:
+    """Clear retained Linux VT contents at the final graphical handoff.
+
+    The insertion is anchored to niri's exact systemd start command. It is
+    restricted to numbered Linux virtual terminals, so launching niri from a
+    pseudo-terminal or nested session does not clear that terminal.
+    """
+
+    lines = text.splitlines(keepends=True)
+    start_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip("\r\n") == NIRI_SESSION_START
+    ]
+    marker_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if line.rstrip("\r\n") == NIRI_SESSION_VT_CLEAR_MARKER
+    ]
+
+    if len(start_indexes) > 1:
+        raise TransformError(
+            "niri-session VT clear: expected at most one systemd start command, "
+            f"found {len(start_indexes)}"
+        )
+    if len(marker_indexes) > 1:
+        raise TransformError(
+            "niri-session VT clear: expected at most one inserted marker, "
+            f"found {len(marker_indexes)}"
+        )
+    if marker_indexes:
+        if len(start_indexes) != 1 or marker_indexes[0] >= start_indexes[0]:
+            raise TransformError("niri-session VT clear: partial or invalid insertion")
+        return text, "already-applied"
+    if not start_indexes:
+        return text, "not-needed"
+
+    index = start_indexes[0]
+    line = lines[index]
+    if line.endswith("\r\n"):
+        ending = "\r\n"
+    elif line.endswith("\n"):
+        ending = "\n"
+    elif line.endswith("\r"):
+        ending = "\r"
+    else:
+        ending = ""
+    separator = ending or "\n"
+    insertion = [item + separator for item in NIRI_SESSION_VT_CLEAR_LINES]
+    insertion.append(NIRI_SESSION_START + ending)
+    lines[index : index + 1] = insertion
+    return "".join(lines), "applied"
 
 
 def transform_hotkeys(text: str) -> str:
@@ -497,7 +629,9 @@ def main() -> int:
     hotkey_path = source / "src/ui/hotkey_overlay.rs"
     mru_path = source / "src/ui/mru.rs"
     screenshot_path = source / "src/ui/screenshot_ui.rs"
-    for path in (hotkey_path, mru_path, screenshot_path):
+    session_path = source / "resources/niri-session"
+    style_paths = (hotkey_path, mru_path, screenshot_path)
+    for path in (*style_paths, session_path):
         if not path.is_file():
             parser.error(f"not a niri source checkout; missing {path}")
 
@@ -505,31 +639,60 @@ def main() -> int:
         hotkey_path: hotkey_path.read_text(encoding="utf-8"),
         mru_path: mru_path.read_text(encoding="utf-8"),
         screenshot_path: screenshot_path.read_text(encoding="utf-8"),
+        session_path: session_path.read_text(encoding="utf-8"),
     }
-    patched = ["fn paint_mica_panel(" in text for text in originals.values()]
-    if all(patched):
-        print("niri Mica style is already applied; nothing to do")
-        return 0
-    if any(patched):
+    style_patched = ["fn paint_mica_panel(" in originals[path] for path in style_paths]
+    if any(style_patched) and not all(style_patched):
         raise TransformError("source tree is only partially patched; reset it before retrying")
-    if any("fn paint_acrylic_panel(" in text for text in originals.values()):
+    if any("fn paint_acrylic_panel(" in originals[path] for path in style_paths):
         raise TransformError(
             "legacy Acrylic changes detected; run update-build-install.sh so niri-src "
             "is reset before applying the Mica style"
         )
 
-    # Complete all three in memory first. No file is written if a transform fails.
-    transformed = {
-        hotkey_path: transform_hotkeys(originals[hotkey_path]),
-        mru_path: transform_mru(originals[mru_path]),
-        screenshot_path: transform_screenshot(originals[screenshot_path]),
+    # Complete every transform in memory first. No file is written if one fails.
+    transformed = dict(originals)
+    if not all(style_patched):
+        transformed.update(
+            {
+                hotkey_path: transform_hotkeys(originals[hotkey_path]),
+                mru_path: transform_mru(originals[mru_path]),
+                screenshot_path: transform_screenshot(originals[screenshot_path]),
+            }
+        )
+    transformed[session_path], import_status = transform_niri_session_import(
+        originals[session_path]
+    )
+    transformed[session_path], vt_clear_status = transform_niri_session_vt_clear(
+        transformed[session_path]
+    )
+
+    changed = {
+        path: text for path, text in transformed.items() if text != originals[path]
     }
-    for path, text in transformed.items():
+    for path, text in changed.items():
         path.write_text(text, encoding="utf-8")
 
-    print(f"applied Mica style to {hotkey_path.relative_to(source)}")
-    print(f"applied Mica style to {mru_path.relative_to(source)}")
-    print(f"applied Mica style to {screenshot_path.relative_to(source)}")
+    if not all(style_patched):
+        print(f"applied Mica style to {hotkey_path.relative_to(source)}")
+        print(f"applied Mica style to {mru_path.relative_to(source)}")
+        print(f"applied Mica style to {screenshot_path.relative_to(source)}")
+    else:
+        print("niri Mica style is already applied")
+
+    if import_status == "applied":
+        print(f"updated systemd environment import in {session_path.relative_to(source)}")
+    elif import_status == "already-applied":
+        print("niri-session systemd environment fix is already applied")
+    else:
+        print("deprecated niri-session environment import not found; left it unchanged")
+
+    if vt_clear_status == "applied":
+        print(f"added final Linux VT clear to {session_path.relative_to(source)}")
+    elif vt_clear_status == "already-applied":
+        print("niri-session final Linux VT clear is already applied")
+    else:
+        print("niri-session systemd start anchor not found; did not add a VT clear")
     return 0
 
 

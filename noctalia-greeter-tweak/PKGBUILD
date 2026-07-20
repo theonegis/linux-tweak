@@ -2,9 +2,9 @@
 
 pkgname=noctalia-greeter-git
 _pkgname=noctalia-greeter
-pkgver=1.0.0.r159.gb17185cdf
-# Keep the patched build newer than ArchLinuxCN's current build of the same
-# commit. Any later VCS revision (r160 and above) still supersedes this package.
+pkgver=1.0.0.r161.gb0069df8a
+# Keep the patched build newer than ArchLinuxCN's current -2 package for the
+# same commit. Any later VCS revision still supersedes this local package.
 pkgrel=2.3
 pkgdesc='Greetd greeter for Noctalia with clean shutdown and quiet VT handoff'
 arch=('x86_64')
@@ -40,17 +40,11 @@ provides=('noctalia-greeter')
 conflicts=('noctalia-greeter')
 source=(
   "git+${url}.git#branch=main"
-  '0001-clean-up-keyboard-listeners-before-shutdown.patch'
-  '0002-clear-vt-before-starting-greeter.patch'
-  '0003-clear-vt-after-compositor-shutdown.patch'
-  '0004-silence-routine-console-output.patch'
+  '0005-quiet-console-handoff.patch'
 )
 sha256sums=(
   'SKIP'
-  '31d077f6ba4abdad277d85887471b6fd740c0be0d24d099a8ee113edd4b23fb9'
-  '83f4cbe879acad9fd265cd064b7ef5ae35b9b8cea9aae6a769cd49df7561e60e'
-  '34c8c43ebf0d29199f964023f1e96b5d0a3705bdc40ad8d7467c100c8dce54a9'
-  '6abd1a4e6de5b1f17229c10a3f3096eedd52995a068b282ce3d40601be009b1d'
+  'f1c61e70b50e6e8478e8758ae5271486edbdd629453f85dd2179b8b95aba8650'
 )
 
 pkgver() {
@@ -66,10 +60,7 @@ pkgver() {
 
 prepare() {
   cd "${_pkgname}"
-  patch -Np1 -i "${srcdir}/0001-clean-up-keyboard-listeners-before-shutdown.patch"
-  patch -Np1 -i "${srcdir}/0002-clear-vt-before-starting-greeter.patch"
-  patch -Np1 -i "${srcdir}/0003-clear-vt-after-compositor-shutdown.patch"
-  patch -Np1 -i "${srcdir}/0004-silence-routine-console-output.patch"
+  patch -Np1 -i "${srcdir}/0005-quiet-console-handoff.patch"
 }
 
 build() {

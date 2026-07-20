@@ -36,14 +36,8 @@ mkdir -p "${BUILD_DIR}"
 cp "${ROOT_DIR}/PKGBUILD" "${BUILD_DIR}/PKGBUILD"
 cp "${ROOT_DIR}/noctalia-greeter-git.install" \
   "${BUILD_DIR}/noctalia-greeter-git.install"
-cp "${ROOT_DIR}/0001-clean-up-keyboard-listeners-before-shutdown.patch" \
-  "${BUILD_DIR}/0001-clean-up-keyboard-listeners-before-shutdown.patch"
-cp "${ROOT_DIR}/0002-clear-vt-before-starting-greeter.patch" \
-  "${BUILD_DIR}/0002-clear-vt-before-starting-greeter.patch"
-cp "${ROOT_DIR}/0003-clear-vt-after-compositor-shutdown.patch" \
-  "${BUILD_DIR}/0003-clear-vt-after-compositor-shutdown.patch"
-cp "${ROOT_DIR}/0004-silence-routine-console-output.patch" \
-  "${BUILD_DIR}/0004-silence-routine-console-output.patch"
+cp "${ROOT_DIR}/0005-quiet-console-handoff.patch" \
+  "${BUILD_DIR}/0005-quiet-console-handoff.patch"
 
 printf 'Building patched noctalia-greeter-git from the latest main branch...\n'
 (

@@ -1,46 +1,28 @@
-From 6a9dd2f94560c4bd14832c7a2fa8e3c51a60f91d Mon Sep 17 00:00:00 2001
+From 0c8a6ef0586e386d29b6f1a6679675edbe9d9ac4 Mon Sep 17 00:00:00 2001
 From: Tanzhenyu <tanzhenyu@localhost>
-Date: Mon, 20 Jul 2026 00:30:00 +0800
-Subject: [PATCH 4/4] greeter: keep routine logs off the handoff VT
+Date: Mon, 20 Jul 2026 08:45:00 +0800
+Subject: [PATCH] greeter: keep routine logs off the handoff VT
 
-Writing a clear sequence and routine diagnostics before the compositor owns
-DRM forces the deferred framebuffer console to become visible.  INFO output
-then remains in the VT buffer and flashes again when DRM is handed to the user
-compositor.
+Routine shell, greeter and wlroots messages are written to the greetd VT.
+They become briefly visible before the greeter obtains DRM and again when it
+hands DRM to the user compositor.
 
-Default the session, greeter and wlroots console thresholds to errors only.
-Explicit file logging continues to retain all greeter levels, and the previous
-verbosity can be restored with NOCTALIA_GREETER_LOG_LEVEL=info and
-WLR_LOG=info.  Move the VT clear to immediately after the backend has entered
-graphics mode, where it blanks the hidden buffer without producing a visible
-text frame.  Errors written after that point remain available at the next text
-handoff.
+Default console logging to errors only while retaining every level in an
+explicit log file.  Allow the former verbosity to be restored with
+NOCTALIA_GREETER_LOG_LEVEL=info and WLR_LOG=info.  Clear the retained VT only
+after wlr_backend_start() has entered graphics mode so the clear itself cannot
+produce a visible framebuffer-console transition.
 ---
- scripts/noctalia-greeter-session     | 56 ++++++++++++++++++-----------
- src/compositor/noctalia_compositor.c | 25 +++++++++++--
+ scripts/noctalia-greeter-session     | 48 +++++++++++++++++------
+ src/compositor/noctalia_compositor.c | 34 +++++++++++++++-
  src/core/log.cpp                     | 76 +++++++++++++++++++++++++++++++-----
- 3 files changed, 125 insertions(+), 32 deletions(-)
+ 3 files changed, 135 insertions(+), 23 deletions(-)
 
 diff --git a/scripts/noctalia-greeter-session b/scripts/noctalia-greeter-session
-index 98e49fb..8ee4f04 100755
+index 8800f63..8ee4f04 100755
 --- a/scripts/noctalia-greeter-session
 +++ b/scripts/noctalia-greeter-session
-@@ -1,14 +1,6 @@
- #!/usr/bin/env sh
- set -eu
- 
--# The greeter and the user compositor must hand DRM ownership to each other.
--# Keep boot diagnostics retained by the underlying Linux VT from becoming
--# visible during that short handoff. /dev/tty is the greetd session's
--# controlling terminal; leave non-VT and test environments untouched.
--if [ -w /dev/tty ]; then
--  printf '\033[H\033[2J\033[3J' > /dev/tty 2>/dev/null || :
--fi
--
- _session_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
- GREETER_BIN="${NOCTALIA_GREETER_BIN:-${_session_dir}/noctalia-greeter}"
- COMPOSITOR_BIN="${NOCTALIA_GREETER_COMPOSITOR_BIN:-${_session_dir}/noctalia-greeter-compositor}"
-@@ -35,11 +27,35 @@ else
+@@ -27,11 +27,35 @@ else
    unset NOCTALIA_GREETER_LOG
  fi
  
@@ -81,7 +63,7 @@ index 98e49fb..8ee4f04 100755
  
  _pam_runtime="${XDG_RUNTIME_DIR:-unset}"
  XDG_RUNTIME_DIR="/tmp/noctalia-runtime-$(id -u)"
-@@ -47,25 +63,25 @@ export XDG_RUNTIME_DIR
+@@ -39,25 +63,25 @@ export XDG_RUNTIME_DIR
  mkdir -p "${XDG_RUNTIME_DIR}"
  chmod 700 "${XDG_RUNTIME_DIR}"
  
@@ -113,7 +95,7 @@ index 98e49fb..8ee4f04 100755
  if command -v dbus-run-session >/dev/null 2>&1; then
    if [ "${_file_logging}" -eq 1 ]; then
      exec dbus-run-session -- env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
-@@ -80,7 +96,7 @@ if command -v dbus-run-session >/dev/null 2>&1; then
+@@ -72,7 +96,7 @@ if command -v dbus-run-session >/dev/null 2>&1; then
      "${COMPOSITOR_BIN}" -- "$@"
  fi
  
@@ -123,13 +105,23 @@ index 98e49fb..8ee4f04 100755
    exec env XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" \
      GREETER_BIN="${GREETER_BIN}" \
 diff --git a/src/compositor/noctalia_compositor.c b/src/compositor/noctalia_compositor.c
-index ef434f2..0bf514e 100644
+index 4c13739..551dd8c 100644
 --- a/src/compositor/noctalia_compositor.c
 +++ b/src/compositor/noctalia_compositor.c
-@@ -1863,6 +1863,23 @@ static void clear_controlling_vt(void) {
-   fclose(tty);
+@@ -1853,6 +1853,33 @@ static void remove_listener_if_set(struct wl_listener* listener) {
+   }
  }
  
++static void clear_controlling_vt(void) {
++  FILE* tty = fopen("/dev/tty", "w");
++  if (tty == NULL) {
++    return;
++  }
++  fputs("\033[H\033[2J\033[3J", tty);
++  fflush(tty);
++  fclose(tty);
++}
++
 +static enum wlr_log_importance configured_wlr_log_level(void) {
 +  const char* level = getenv("WLR_LOG");
 +  if (level == NULL || level[0] == '\0' || strcmp(level, "error") == 0) {
@@ -150,7 +142,7 @@ index ef434f2..0bf514e 100644
  static void cleanup_server_listeners(struct greeter_server* server) {
    server->shutting_down = true;
    remove_listener_if_set(&server->new_output);
-@@ -1902,7 +1919,7 @@ static void cleanup_server_listeners(struct greeter_server* server) {
+@@ -1881,7 +1908,7 @@ static void cleanup_server_listeners(struct greeter_server* server) {
  }
  
  int main(int argc, char** argv) {
@@ -159,7 +151,7 @@ index ef434f2..0bf514e 100644
  
    struct greeter_server server = {0};
    server.idle_timerfd = -1;
-@@ -2029,6 +2046,11 @@ int main(int argc, char** argv) {
+@@ -2008,6 +2035,11 @@ int main(int argc, char** argv) {
      return 1;
    }
  
@@ -171,13 +163,6 @@ index ef434f2..0bf514e 100644
    if (server.session != NULL) {
      server.session_active.notify = handle_session_active;
      wl_signal_add(&server.session->events.active, &server.session_active);
-@@ -2082,6 +2104,5 @@ int main(int argc, char** argv) {
-   cleanup_server_listeners(&server);
-   wl_display_destroy_clients(server.display);
-   wl_display_destroy(server.display);
--  clear_controlling_vt();
-   return 0;
- }
 diff --git a/src/core/log.cpp b/src/core/log.cpp
 index 5c8c9d8..6dcbb0c 100644
 --- a/src/core/log.cpp

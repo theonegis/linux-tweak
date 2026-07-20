@@ -1,17 +1,17 @@
 # Noctalia greeter 本地修正包
 
-这个目录为 ArchLinuxCN 的同名 `noctalia-greeter-git` 包增加四个补丁：
+这个目录为 ArchLinuxCN 的同名 `noctalia-greeter-git` 包应用一份合并补丁
+`0005-quiet-console-handoff.patch`：
 
-1. 在销毁 wlroots display 之前解除所有键盘 listener，避免登录成功时
-   `wlr_keyboard_finish()` 进入已经失效的回调链并触发 SIGSEGV；
-2. 原始清屏补丁，用于清除控制 VT 的画面和 scrollback；
-3. 原始 DRM 交接补丁，用于 greeter 退出时再次处理 VT；
-4. 根据实际启动时间线修正前两个补丁的时机：移除 DRM 接管前会触发
-   fbcon 的清屏，把清屏移动到 `wlr_backend_start()` 成功、VT 已处于隐藏
-   图形模式之后；同时让 shell、Noctalia logger 和 wlroots 默认只向 tty
-   输出 ERROR，INFO 与 WARNING 不再产生文字闪屏。
+1. shell、Noctalia logger 和 wlroots 默认只向 tty 输出 ERROR，INFO 与
+   WARNING 不再产生文字闪屏；
+2. 在 `wlr_backend_start()` 成功、VT 已处于隐藏图形模式之后清空画面与
+   scrollback，清屏本身不会再提前触发 fbcon；
+3. 显式文件日志仍保留全部级别，便于发生问题时排查。
 
-第四个补丁保留真正的错误输出。显式文件日志仍记录全部 Noctalia 日志；
+上游从 `r161` 起已经合入了 display teardown 的键盘/seat 崩溃修复，因此
+旧的 `0001`–`0004` 文件只作为历史记录保留，不再由 PKGBUILD 应用。
+合并补丁保留真正的错误输出。显式文件日志仍记录全部 Noctalia 日志；
 需要临时恢复控制台诊断时，可以设置
 `NOCTALIA_GREETER_LOG_LEVEL=info` 和 `WLR_LOG=info`。两个 compositor 之间
 仍会有不可避免的 DRM 交接，但在没有错误时底层 VT 应保持空白。

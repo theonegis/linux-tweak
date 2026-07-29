@@ -1,0 +1,12 @@
+[
+  {
+    "input_combination": [
+      {
+        "type": 1,
+        "code": 58
+      }
+    ],
+    "target_uinput": "mouse",
+    "output_symbol": "BTN_LEFT"
+  }
+]

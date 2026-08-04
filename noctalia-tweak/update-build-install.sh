@@ -2,18 +2,18 @@
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-BUILD_DIR=${NOCTALIA_GREETER_BUILD_DIR:-"${ROOT_DIR}/build-local"}
+BUILD_DIR=${NOCTALIA_BUILD_DIR:-"${ROOT_DIR}/build-local"}
 INSTALL=true
 
 usage() {
   cat <<'EOF'
 Usage: ./update-build-install.sh [--build-only]
 
-  --build-only  Build the patched Arch package but do not install it.
+  --build-only  Build and test the patched Arch package without installing it.
 
-The script fetches the latest noctalia-greeter main branch, applies the local
-shutdown, quiet-console and VT handoff patches, and builds the same package
-name used by ArchLinuxCN: noctalia-greeter-git.
+The script fetches Noctalia's latest main branch, applies the local clipboard
+owner-handoff fix, runs the test suite, and builds the same package name used
+by ArchLinuxCN: noctalia-git.
 EOF
 }
 
@@ -27,19 +27,17 @@ esac
 for command in git makepkg meson ninja; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     printf 'error: missing command: %s\n' "${command}" >&2
-    printf 'install prerequisites with: sudo pacman -S --needed base-devel git meson ninja wayland-protocols\n' >&2
+    printf 'install prerequisites with: sudo pacman -S --needed base-devel git meson ninja nlohmann-json stb wayland-protocols\n' >&2
     exit 1
   fi
 done
 
 mkdir -p "${BUILD_DIR}"
 cp "${ROOT_DIR}/PKGBUILD" "${BUILD_DIR}/PKGBUILD"
-cp "${ROOT_DIR}/noctalia-greeter-git.install" \
-  "${BUILD_DIR}/noctalia-greeter-git.install"
-cp "${ROOT_DIR}/0005-quiet-console-handoff.patch" \
-  "${BUILD_DIR}/0005-quiet-console-handoff.patch"
+cp "${ROOT_DIR}/0001-fix-deferred-clipboard-orphan-adoption.patch" \
+  "${BUILD_DIR}/0001-fix-deferred-clipboard-orphan-adoption.patch"
 
-printf 'Building patched noctalia-greeter-git from the latest main branch...\n'
+printf 'Building patched noctalia-git from the latest main branch...\n'
 (
   cd "${BUILD_DIR}"
   if [[ "${INSTALL}" == true ]]; then
@@ -56,5 +54,5 @@ PACKAGE_FILE=$(
 printf '\nBuilt package: %s\n' "${PACKAGE_FILE}"
 
 if [[ "${INSTALL}" == true ]]; then
-  printf 'Installed. Reboot to test the greeter handoff and shutdown cleanup.\n'
+  printf 'Installed. Log out and back in (or restart Noctalia) before testing.\n'
 fi

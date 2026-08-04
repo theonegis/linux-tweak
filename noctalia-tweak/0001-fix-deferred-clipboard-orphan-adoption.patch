@@ -1,0 +1,96 @@
+From 2b0b1970cdeaa7df7d1ee145a15f5d603c578507 Mon Sep 17 00:00:00 2001
+From: Tanzhenyu <tanzhenyu@localhost>
+Date: Tue, 4 Aug 2026 10:05:00 +0800
+Subject: [PATCH] fix(clipboard): wake poll source for deferred orphan adoption
+
+The main loop dispatches a PollSource only when one of its descriptors is
+ready or its timeout expires. When the current Wayland selection becomes NULL,
+ClipboardService defers adoption until its next poll dispatch so a transient
+NULL selection during handoff does not restore stale data. This can happen when
+an application releases or replaces its selection data source even if the
+application itself remains running. At that point the clipboard can have no
+active read or write descriptor, leaving the deferred adoption pending
+indefinitely.
+
+Expose pending poll work and make ClipboardPollSource request an immediate
+timeout while orphan adoption is queued. Extend the clipboard service test to
+exercise the real poll adapter instead of manually dispatching the service.
+---
+ src/wayland/clipboard_poll_source.h | 2 ++
+ src/wayland/clipboard_service.cpp   | 2 ++
+ src/wayland/clipboard_service.h     | 4 ++++
+ tests/clipboard_service_test.cpp    | 8 +++++++-
+ 4 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/src/wayland/clipboard_poll_source.h b/src/wayland/clipboard_poll_source.h
+index 583abbe08..ef320edd3 100644
+--- a/src/wayland/clipboard_poll_source.h
++++ b/src/wayland/clipboard_poll_source.h
+@@ -11,6 +11,8 @@ public:
+     m_clipboard.dispatchPollEvents(fds, startIdx, m_pollFdCount);
+   }
+ 
++  [[nodiscard]] int pollTimeoutMs() const override { return m_clipboard.hasPendingPollWork() ? 0 : -1; }
++
+ protected:
+   void doAddPollFds(std::vector<pollfd>& fds) override { m_pollFdCount = m_clipboard.addPollFds(fds); }
+ 
+diff --git a/src/wayland/clipboard_service.cpp b/src/wayland/clipboard_service.cpp
+index 7b60a6d56..562cbbb14 100644
+--- a/src/wayland/clipboard_service.cpp
++++ b/src/wayland/clipboard_service.cpp
+@@ -587,6 +587,8 @@ ClipboardPersistenceState ClipboardService::persistenceState() const noexcept {
+ 
+ bool ClipboardService::persistenceMigrationPending() const noexcept { return m_persistenceMigrationPending; }
+ 
++bool ClipboardService::hasPendingPollWork() const noexcept { return m_pendingOrphanAdopt; }
++
+ void ClipboardService::syncPersistence() {
+   m_dataKey.reset();
+   setPersistenceState(ClipboardPersistenceState::Opening, m_persistenceMigrationPending);
+diff --git a/src/wayland/clipboard_service.h b/src/wayland/clipboard_service.h
+index 137b34229..a90bb84e5 100644
+--- a/src/wayland/clipboard_service.h
++++ b/src/wayland/clipboard_service.h
+@@ -90,6 +90,10 @@ public:
+   [[nodiscard]] std::uint64_t changeSerial() const noexcept;
+   [[nodiscard]] ClipboardPersistenceState persistenceState() const noexcept;
+   [[nodiscard]] bool persistenceMigrationPending() const noexcept;
++  // The main loop dispatches poll sources only when an fd or timeout wakes.
++  // Orphan adoption is deferred from a Wayland callback and can have no fd of
++  // its own, so the poll adapter uses this to request an immediate dispatch.
++  [[nodiscard]] bool hasPendingPollWork() const noexcept;
+   [[nodiscard]] std::size_t addPollFds(std::vector<pollfd>& fds) const;
+ 
+   void syncPersistence();
+diff --git a/tests/clipboard_service_test.cpp b/tests/clipboard_service_test.cpp
+index 6f81df9da..1dff950c1 100644
+--- a/tests/clipboard_service_test.cpp
++++ b/tests/clipboard_service_test.cpp
+@@ -5,6 +5,7 @@
+ 
+ #include "security/secret_store.h"
+ #include "security/storage_key_provider.h"
++#include "wayland/clipboard_poll_source.h"
+ #include "wayland/clipboard_service.h"
+ 
+ #include <algorithm>
+@@ -234,10 +235,15 @@ int main() {
+   {
+     // Text keeps its aliases, because those are the same bytes.
+     Harness harness;
++    ClipboardPollSource pollSource(harness.clipboard);
+     fake.claims = 0;
+     simulateCopy(harness.clipboard, &offerIds[1], "text/plain;charset=utf-8", bytesOf("hello"));
+     harness.clipboard.handleSelection(nullptr);
+-    flushDeferredAdopt(harness.clipboard);
++    expect(pollSource.pollTimeoutMs() == 0, "orphan adoption did not request an immediate poll dispatch");
++    std::vector<pollfd> fds;
++    const std::size_t startIdx = pollSource.addPollFds(fds);
++    pollSource.dispatch(fds, startIdx);
++    expect(pollSource.pollTimeoutMs() == -1, "clipboard poll source stayed armed after orphan adoption");
+     expect(fake.claims == 1, "did not adopt an orphaned text selection");
+     expect(
+         std::ranges::find(fake.offeredMimeTypes, "text/plain") != fake.offeredMimeTypes.end(),
+-- 
+2.50.1

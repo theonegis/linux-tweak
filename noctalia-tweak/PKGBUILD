@@ -1,0 +1,108 @@
+# Maintainer: Tanzhenyu <tanzhenyu@localhost>
+
+pkgname=noctalia-git
+_pkgname=noctalia
+pkgver=5.0.0.r5062.g50f0f0950.local1
+# The .local1 pkgver suffix keeps this build newer than ArchLinuxCN's package
+# for the same commit. A later VCS revision still supersedes it and can then be
+# patched by rerunning update-build-install.sh.
+pkgrel=1
+pkgdesc='Noctalia Wayland shell with reliable clipboard owner handoff'
+arch=('x86_64' 'aarch64')
+url='https://github.com/noctalia-dev/noctalia'
+license=('MIT')
+options=('!debug')
+depends=(
+  'cairo'
+  'curl'
+  'fontconfig'
+  'freetype2'
+  'gcc-libs'
+  'git'
+  'glib2'
+  'glibc'
+  'jemalloc'
+  'libglvnd'
+  'libical'
+  'libjxl'
+  'libpipewire'
+  'libqalculate'
+  'librsvg'
+  'libsecret'
+  'libsndfile'
+  'libsodium'
+  'libwebp'
+  'libwireplumber'
+  'libxkbcommon'
+  'libxml2'
+  'md4c'
+  'pam'
+  'polkit'
+  'pango'
+  'sdbus-cpp'
+  'tomlplusplus'
+  'wayland'
+)
+makedepends=(
+  'meson'
+  'ninja'
+  'nlohmann-json'
+  'pkgconf'
+  'stb'
+  'wayland-protocols'
+)
+provides=('noctalia')
+conflicts=('noctalia' 'noctalia-bin')
+source=(
+  "${_pkgname}::git+${url}.git#branch=main"
+  '0001-fix-deferred-clipboard-orphan-adoption.patch'
+)
+sha256sums=(
+  'SKIP'
+  '78e8e0c41bca28bbb1d48b654b6b380ecdd20ada3b05f227aabb99be1d6316fa'
+)
+
+pkgver() {
+  cd "${_pkgname}"
+
+  local version
+  version="$(sed -n "s/^  version: '\([^']*\)',/\1/p" meson.build)"
+  printf '%s.r%s.g%s.local1' \
+    "${version}" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short=9 HEAD)"
+}
+
+prepare() {
+  cd "${_pkgname}"
+
+  if git apply --reverse --check "${srcdir}/0001-fix-deferred-clipboard-orphan-adoption.patch" 2>/dev/null; then
+    printf 'Clipboard wake-up fix is already present upstream; skipping local patch.\n'
+  elif git apply --check "${srcdir}/0001-fix-deferred-clipboard-orphan-adoption.patch" 2>/dev/null; then
+    git apply "${srcdir}/0001-fix-deferred-clipboard-orphan-adoption.patch"
+  else
+    printf 'error: clipboard patch no longer applies; review the upstream implementation.\n' >&2
+    return 1
+  fi
+}
+
+build() {
+  CXXFLAGS+=' -Wno-unused-result'
+  arch-meson "${_pkgname}" build-release \
+    -Db_ndebug=true \
+    -Dtests=enabled
+  meson compile -C build-release
+}
+
+check() {
+  meson test -C build-release --print-errorlogs
+}
+
+package() {
+  meson install -C build-release --destdir "${pkgdir}"
+
+  install -Dm644 "${_pkgname}/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 "${_pkgname}/README.md" \
+    "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

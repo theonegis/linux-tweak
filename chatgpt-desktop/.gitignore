@@ -1,0 +1,6 @@
+chatgpt_amd64.deb
+.download-*.part
+pkg/
+src/
+*.pkg.tar.*
+

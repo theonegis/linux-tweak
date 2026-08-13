@@ -1,0 +1,206 @@
+# Maintainer: local package
+
+pkgname=chatgpt-desktop
+pkgver=26.803.81509
+pkgrel=1
+pkgdesc='Official OpenAI ChatGPT desktop app, repackaged for Arch Linux'
+arch=('x86_64')
+url='https://chatgpt.com/codex/'
+license=('custom')
+options=('!strip' '!debug')
+
+provides=('chatgpt' 'openai-codex-desktop')
+conflicts=(
+  'chatgpt'
+  'chatgpt-desktop-bin'
+  'chatgpt-desktop-app-bin'
+  'codex-desktop'
+  'official-chatgpt-bin'
+  'openai-chatgpt'
+  'openai-codex-desktop'
+)
+
+depends=(
+  'alsa-lib'
+  'at-spi2-core'
+  'bash'
+  'cairo'
+  'dbus'
+  'expat'
+  'gcc-libs'
+  'gdk-pixbuf2'
+  'glib2'
+  'glibc'
+  'graphite'
+  'gtk3'
+  'libcups'
+  'libdrm'
+  'libglvnd'
+  'libnotify'
+  'libusb'
+  'libx11'
+  'libxcb'
+  'libxcomposite'
+  'libxdamage'
+  'libxext'
+  'libxfixes'
+  'libxkbcommon'
+  'libxrandr'
+  'mesa'
+  'nspr'
+  'nss'
+  'openssl'
+  'pango'
+  'systemd-libs'
+  'xdg-utils'
+)
+
+optdepends=(
+  'apparmor: support the bundled user-namespace profile'
+  'git: Git repository integration'
+  'gnome-keyring: Secret Service backend for credential storage'
+  'libsecret: Secret Service credential storage support'
+  'openssh: remote SSH workspaces'
+  'pipewire: screen sharing under Wayland'
+)
+
+makedepends=('asar' 'libarchive' 'nodejs' 'xz')
+backup=('etc/apparmor.d/chatgpt')
+install='chatgpt-desktop.install'
+source=('chatgpt_amd64.deb' 'patch-frameless.js' 'chatgpt-launcher.sh')
+noextract=('chatgpt_amd64.deb')
+sha256sums=('SKIP' 'SKIP' 'SKIP')
+
+_deb_control() {
+  bsdtar -xOf "${srcdir}/chatgpt_amd64.deb" control.tar.xz |
+    bsdtar -xOf - ./control
+}
+
+pkgver() {
+  _deb_control | awk -F ': ' '$1 == "Version" { print $2; exit }'
+}
+
+prepare() {
+  local control package architecture maintainer
+  control="$(_deb_control)"
+  package="$(awk -F ': ' '$1 == "Package" { print $2; exit }' <<<"${control}")"
+  architecture="$(awk -F ': ' '$1 == "Architecture" { print $2; exit }' <<<"${control}")"
+  maintainer="$(awk -F ': ' '$1 == "Maintainer" { print $2; exit }' <<<"${control}")"
+
+  [[ "${package}" == 'chatgpt' ]] || { printf 'Unexpected Debian package: %s\n' "${package}" >&2; return 1; }
+  [[ "${architecture}" == 'amd64' ]] || { printf 'Unexpected Debian architecture: %s\n' "${architecture}" >&2; return 1; }
+  [[ "${maintainer}" == OpenAI* ]] || { printf 'Unexpected Debian maintainer: %s\n' "${maintainer}" >&2; return 1; }
+}
+
+package() {
+  local app_root asar_file assets_root work_root titlebar_buttons
+
+  bsdtar -xOf "${srcdir}/chatgpt_amd64.deb" data.tar.xz |
+    bsdtar --no-same-owner -xJf - -C "${pkgdir}"
+
+  app_root="${pkgdir}/usr/lib/chatgpt"
+  asar_file="${app_root}/resources/app.asar"
+  assets_root="${app_root}/content/webview/assets"
+  work_root="${srcdir}/frameless-work"
+  titlebar_buttons="${CHATGPT_TITLEBAR_BUTTONS:-show}"
+
+  [[ -r "${asar_file}" ]] || { printf 'Missing application archive: %s\n' "${asar_file}" >&2; return 1; }
+  case "${titlebar_buttons}" in
+    show|hide) ;;
+    *)
+      printf 'Invalid CHATGPT_TITLEBAR_BUTTONS value: %s\n' "${titlebar_buttons}" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${titlebar_buttons}" == 'hide' ]]; then
+    rm -rf "${work_root}"
+    mkdir -p "${work_root}/app"
+
+    asar list -i "${asar_file}" > "${work_root}/original.list"
+
+    printf '%s\n' 'Extracting and patching the Electron application archive...'
+    asar extract "${asar_file}" "${work_root}/app"
+    if [[ -d "${assets_root}" ]]; then
+      node "${srcdir}/patch-frameless.js" "${work_root}/app" "${assets_root}"
+    else
+      node "${srcdir}/patch-frameless.js" "${work_root}/app"
+    fi
+
+    # Derive the topmost unpacked paths from the official archive. This preserves
+    # its native-module layout across releases without hard-coding module names.
+    awk '
+      {
+        state[NR] = $1
+        path[NR] = $3
+        sub(/^\//, "", path[NR])
+        state_by_path[path[NR]] = state[NR]
+      }
+      END {
+        for (i = 1; i <= NR; i++) {
+          if (state[i] != "unpack") continue
+          parent = path[i]
+          sub(/\/[^/]+$/, "", parent)
+          if (state_by_path[parent] != "unpack") print path[i]
+        }
+      }
+    ' "${work_root}/original.list" > "${work_root}/unpack-roots"
+
+    local unpack_path unpack_file_glob='' unpack_dir_glob=''
+    local -a unpack_files=() unpack_dirs=() asar_pack_args=()
+    while IFS= read -r unpack_path; do
+      [[ -n "${unpack_path}" ]] || continue
+      if [[ ! "${unpack_path}" =~ ^[A-Za-z0-9_@.+/-]+$ ]]; then
+        printf 'Unsafe path in ASAR unpack manifest: %s\n' "${unpack_path}" >&2
+        return 1
+      fi
+      if [[ -d "${work_root}/app/${unpack_path}" ]]; then
+        unpack_dirs+=("${unpack_path}")
+      elif [[ -f "${work_root}/app/${unpack_path}" ]]; then
+        unpack_files+=("${unpack_path}")
+      else
+        printf 'Missing path from ASAR unpack manifest: %s\n' "${unpack_path}" >&2
+        return 1
+      fi
+    done < "${work_root}/unpack-roots"
+
+    if (( ${#unpack_files[@]} > 0 )); then
+      unpack_file_glob="$(IFS=,; printf '%s' "${unpack_files[*]}")"
+      (( ${#unpack_files[@]} == 1 )) || unpack_file_glob="{${unpack_file_glob}}"
+      asar_pack_args+=(--unpack "**/${unpack_file_glob}")
+    fi
+    if (( ${#unpack_dirs[@]} > 0 )); then
+      unpack_dir_glob="$(IFS=,; printf '%s' "${unpack_dirs[*]}")"
+      (( ${#unpack_dirs[@]} == 1 )) || unpack_dir_glob="{${unpack_dir_glob}}"
+      asar_pack_args+=(--unpack-dir "**/${unpack_dir_glob}")
+    fi
+    asar pack "${work_root}/app" "${work_root}/app.asar" "${asar_pack_args[@]}"
+    asar list -i "${work_root}/app.asar" > "${work_root}/patched.list"
+    LC_ALL=C sort "${work_root}/original.list" > "${work_root}/original.sorted"
+    LC_ALL=C sort "${work_root}/patched.list" > "${work_root}/patched.sorted"
+    if ! cmp -s "${work_root}/original.sorted" "${work_root}/patched.sorted"; then
+      printf '%s\n' 'Repacked ASAR layout differs from the official archive.' >&2
+      diff -u "${work_root}/original.sorted" "${work_root}/patched.sorted" | head -80 || true
+      return 1
+    fi
+    install -Dm644 "${work_root}/app.asar" "${asar_file}"
+  else
+    printf '%s\n' 'Keeping the official top-right title-bar buttons.'
+  fi
+
+  rm -f "${pkgdir}/usr/bin/chatgpt"
+  install -Dm755 "${srcdir}/chatgpt-launcher.sh" "${pkgdir}/usr/bin/chatgpt"
+  install -Dm755 "${srcdir}/chatgpt-launcher.sh" "${app_root}/codex-launcher"
+  ln -sf chatgpt "${pkgdir}/usr/bin/codex-desktop"
+
+  install -d "${pkgdir}/usr/share/licenses/${pkgname}"
+  if [[ -r "${pkgdir}/usr/share/doc/chatgpt/copyright" ]]; then
+    install -Dm644 "${pkgdir}/usr/share/doc/chatgpt/copyright" \
+      "${pkgdir}/usr/share/licenses/${pkgname}/copyright"
+  fi
+  if [[ -r "${app_root}/LICENSES.chromium.html" ]]; then
+    ln -s /usr/lib/chatgpt/LICENSES.chromium.html \
+      "${pkgdir}/usr/share/licenses/${pkgname}/LICENSES.chromium.html"
+  fi
+  rm -rf "${pkgdir}/usr/share/doc" "${pkgdir}/usr/share/lintian"
+}

@@ -15,7 +15,7 @@ Usage: ./update-build-install.sh [--build-only]
 
 The managed niri-src checkout is disposable. Every run discards tracked
 changes in that checkout before switching to the newest stable release tag.
-Keep your style changes in apply-niri-acrylic.py, not inside niri-src.
+Keep your changes in apply-niri-tweak.py, not inside niri-src.
 
 Set NIRI_TAG=v26.04 to build a specific stable release instead of the newest.
 EOF
@@ -31,7 +31,7 @@ esac
 for command in git python3 makepkg rustc cargo; do
   if ! command -v "${command}" >/dev/null 2>&1; then
     printf 'error: missing command: %s\n' "${command}" >&2
-    printf 'install prerequisites with: sudo pacman -S --needed base-devel git rust clang inter-font\n' >&2
+    printf 'install prerequisites with: sudo pacman -S --needed base-devel git rust clang\n' >&2
     exit 1
   fi
 done
@@ -68,7 +68,7 @@ printf 'Preparing clean source at %s...\n' "${LATEST_TAG}"
 git -C "${REPO_DIR}" switch --detach --force "${LATEST_TAG}"
 git -C "${REPO_DIR}" reset --hard "${LATEST_TAG}"
 
-python3 "${ROOT_DIR}/apply-niri-acrylic.py" "${REPO_DIR}"
+python3 "${ROOT_DIR}/apply-niri-tweak.py" "${REPO_DIR}"
 git -C "${REPO_DIR}" diff --check
 
 PKGVER=${LATEST_TAG#v}
@@ -81,7 +81,7 @@ export NIRI_SRC="${REPO_DIR}"
 export NIRI_PKGVER="${PKGVER}"
 export NIRI_COMMIT="${COMMIT}"
 
-printf 'Building niri Mica overlays %s (%s)...\n' "${PKGVER}" "${COMMIT}"
+printf 'Building niri-tweak %s (%s)...\n' "${PKGVER}" "${COMMIT}"
 (
   cd "${BUILD_DIR}"
   makepkg --syncdeps --force

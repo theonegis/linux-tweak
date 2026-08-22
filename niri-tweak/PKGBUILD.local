@@ -6,11 +6,11 @@
 
 pkgname=niri
 pkgver="${NIRI_PKGVER}"
-# CachyOS currently uses 1.1 for its optimized rebuild. Keep this local patch
-# one subrelease newer so it is not immediately replaced by the same source
-# version; any later upstream version or repository pkgrel still supersedes it.
-pkgrel=1.3
-pkgdesc='Niri with blue-green Mica native information overlays'
+# Keep this local patch newer than the current optimized repository rebuild so
+# it is not immediately replaced by the same source version. Increment pkgrel
+# whenever the local tweak set changes.
+pkgrel=1.5
+pkgdesc='Niri with rounded overlays and custom touchpad gestures'
 arch=('x86_64')
 url='https://github.com/niri-wm/niri'
 license=('GPL-3.0-or-later')
@@ -22,10 +22,9 @@ depends=(
   'cairo'
   'glib2'
   'glibc'
-  'inter-font'
   'libdisplay-info'
   'libgcc'
-  'libinput'
+  'libinput>=1.28'
   'libpipewire'
   'libxkbcommon'
   'mesa'
@@ -63,7 +62,7 @@ build() {
   cd "${NIRI_SRC}"
   export CARGO_HOME="${srcdir}/cargo"
   export NIRI_BUILD_COMMIT="${NIRI_COMMIT}"
-  export NIRI_BUILD_VERSION_STRING="${pkgver}-${pkgrel}-mica (${NIRI_BUILD_COMMIT})"
+  export NIRI_BUILD_VERSION_STRING="${pkgver}-${pkgrel}-tweak (${NIRI_BUILD_COMMIT})"
 
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
   cargo build --frozen --release

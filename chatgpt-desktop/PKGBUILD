@@ -1,7 +1,7 @@
 # Maintainer: local package
 
 pkgname=chatgpt-desktop
-pkgver=26.803.81509
+pkgver=26.810.50856
 pkgrel=1
 pkgdesc='Official OpenAI ChatGPT desktop app, repackaged for Arch Linux'
 arch=('x86_64')

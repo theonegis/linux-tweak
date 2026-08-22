@@ -1,0 +1,43 @@
+diff --git a/src/im/keyboard/keyboard.cpp b/src/im/keyboard/keyboard.cpp
+index 1820e49..6ac2195 100644
+--- a/src/im/keyboard/keyboard.cpp
++++ b/src/im/keyboard/keyboard.cpp
+@@ -263,14 +263,16 @@ std::vector<InputMethodEntry> KeyboardEngine::listInputMethods() {
+                                : layoutInfo.name;
+         auto name = _("Keyboard - {0}", description);
+         auto uniqueName = imNamePrefix + layoutInfo.name;
++        auto label = layoutInfo.shortDescription.empty()
++                         ? layoutInfo.name
++                         : layoutInfo.shortDescription;
+         if (uniqueName == "keyboard-us") {
+             usExists = true;
++            label = "英";
+         }
+         result.push_back(
+             std::move(InputMethodEntry(uniqueName, name, language, "keyboard")
+-                          .setLabel(layoutInfo.shortDescription.empty()
+-                                        ? layoutInfo.name
+-                                        : layoutInfo.shortDescription)
++                          .setLabel(std::move(label))
+                           .setIcon("input-keyboard")
+                           .setConfigurable(true)));
+         for (const auto &variantInfo : layoutInfo.variantInfos) {
+@@ -324,7 +326,8 @@ std::vector<InputMethodEntry> KeyboardEngine::listInputMethods() {
+                     std::move(InputMethodEntry(uniqueName,
+                                                _("{0} (Not Available)", *desc),
+                                                *lang, "keyboard")
+-                                  .setLabel(*label)
++                                  .setLabel(uniqueName == "keyboard-us" ? "英"
++                                                                         : *label)
+                                   .setIcon("input-keyboard")));
+             }
+         }
+@@ -346,7 +349,7 @@ std::vector<InputMethodEntry> KeyboardEngine::listInputMethods() {
+     if (!usExists) {
+         result.push_back(std::move(
+             InputMethodEntry("keyboard-us", _("Keyboard"), "en", "keyboard")
+-                .setLabel("en")
++                .setLabel("英")
+                 .setIcon("input-keyboard")
+                 .setConfigurable(true)));
+     }

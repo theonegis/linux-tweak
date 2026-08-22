@@ -1,0 +1,50 @@
+# Maintainer: Tanzhenyu <tanzhenyu@localhost>
+# Based on the official Arch Linux fcitx5 package.
+
+pkgname=fcitx5
+pkgver=5.1.21
+_dictver=20121020
+pkgrel=1.2
+pkgdesc="Next generation input method framework; keyboard-us tray label is 英"
+arch=('x86_64')
+url="https://github.com/fcitx/fcitx5"
+license=('LGPL-2.1-or-later AND Unicode-DFS-2016')
+conflicts=('fcitx')
+groups=('fcitx5-im')
+depends=('cairo' 'enchant' 'iso-codes' 'libgl' 'libxkbcommon-x11' 'pango' 'systemd' 'wayland'
+         'xcb-imdkit' 'xcb-util-wm' 'libxkbfile' 'gdk-pixbuf2' 'yoga')
+makedepends=('git' 'extra-cmake-modules' 'ninja' 'nlohmann-json' 'plasma-wayland-protocols' 'wayland-protocols')
+source=("git+https://github.com/fcitx/fcitx5.git#tag=$pkgver?signed"
+        "https://download.fcitx-im.org/data/en_dict-$_dictver.tar.gz"
+        '0001-label-keyboard-us-as-ying.patch')
+noextract=("en_dict-$_dictver.tar.gz")
+sha512sums=('7c692ce6bfc7c6cc27ebc6040e8a2ee8be496cce99575e64b6e1ba3b9eb066dfa4288032568d54b8c8f4b26219b39295ef2b49c0579e20d088b9c875bf801b80'
+            '8418bd02492bfd786c0fab93be4400ef027ec8e9fac02220cc1f653f5eb67f54573a6a84a15baba19bb34ab892745c87df16499d6304ea75009131e2ab3b97f2'
+            '9bf91f6c672f5e9537cd8fba6dc9f46547df10ecf31c3ca796884dc5e7c20f181090e7e0833af13e695e4b820b02e30c488cc7341d772d10f76da5751c33f395')
+validpgpkeys=('2CC8A0609AD2A479C65B6D5C8E8B898CBF2412F9')
+
+prepare() {
+  mv en_dict-$_dictver.tar.gz fcitx5/src/modules/spell/en_dict-$_dictver.tar.gz
+  grep "SPELL_EN_DICT_VER $_dictver" fcitx5/src/modules/spell/CMakeLists.txt
+  git -C fcitx5 apply --check "$srcdir/0001-label-keyboard-us-as-ying.patch"
+  git -C fcitx5 apply "$srcdir/0001-label-keyboard-us-as-ying.patch"
+}
+
+build() {
+  cd fcitx5
+  cmake -GNinja -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=/usr/lib \
+        -DCMAKE_INSTALL_SYSCONFDIR=/etc -DCMAKE_INSTALL_LIBEXECDIR=/usr/lib \
+        -DUSE_SYSTEM_YOGA=ON .
+  ninja
+}
+
+check() {
+  cd fcitx5
+  ninja test
+}
+
+package() {
+  cd fcitx5
+  DESTDIR="$pkgdir" ninja install
+  install -Dm644 LICENSES/Unicode-DFS-2016.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

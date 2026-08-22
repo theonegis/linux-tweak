@@ -31,6 +31,7 @@ recent-windows {
         corner-radius 8
     }
 }
+
 // Input device configuration.
 // Find the full list of options on the wiki:
 // https://niri-wm.github.io/niri/Configuration:-Input
@@ -62,9 +63,9 @@ input {
         dwt
         // dwtp
         // drag false
-        // drag-lock
+        drag-lock
         natural-scroll
-        accel-speed 0.2
+        accel-speed 0.35
         accel-profile "adaptive"
         scroll-method "two-finger"
         // disabled-on-external-mouse
@@ -191,7 +192,7 @@ layout {
         // off
 
         // How many logical pixels the ring extends out from the windows.
-        width 3
+        width 2
 
         // Colors can be set in a variety of ways:
         // - CSS named colors: "red"
@@ -229,7 +230,7 @@ layout {
         // If you enable the border, you probably want to disable the focus ring.
         off
 
-        width 4
+        width 3
         active-color "#ffc87f"
         inactive-color "#505050"
 
@@ -322,6 +323,7 @@ layout {
 spawn-at-startup "noctalia" "--daemon"
 spawn-at-startup "fcitx5" "-d" "-u" "classicui"
 spawn-at-startup "sh" "-c" "xrdb -merge ~/.Xresources"
+spawn-at-startup "~/.cargo/bin/niri-switch-daemon"
 
 // To run a shell command (with variables, pipes, etc.), use spawn-sh-at-startup:
 // spawn-sh-at-startup "qs -c ~/source/qs/MyAwesomeShell"
@@ -359,7 +361,10 @@ animations {
     window-movement {
         spring damping-ratio=0.75 stiffness=323 epsilon=0.0001
     }
+
     window-resize {
+        duration-ms 450
+        curve "ease-out-cubic"
         custom-shader r"
             vec4 resize_color(vec3 coords_curr_geo, vec3 size_curr_geo) {
                 vec3 coords_tex_next = niri_geo_to_tex_next * coords_curr_geo;
@@ -392,9 +397,8 @@ animations {
     }
 
 
-
     window-close {
-        duration-ms 700
+        duration-ms 600
         curve "linear"
         custom-shader "vec4 fall_to_bottom(vec3 coords_geo, vec3 size_geo) {
             float progress = niri_clamped_progress * niri_clamped_progress;
@@ -426,8 +430,9 @@ animations {
 
 window-rule {
     match app-id="Alacritty"
-    match app-id="codex-desktop"
+    match app-id="Chatgpt"
     match app-id="wechat"
+    match app-id="org.gnome.Nautilus"
     draw-border-with-background true
     default-column-width { proportion 0.75; }
     background-effect { blur true; }
@@ -435,8 +440,10 @@ window-rule {
 
 window-rule {
     match app-id="google-chrome"
-    match app-id="wps"
-    match app-id="onlyoffice"
+    match app-id="wpsoffice"
+    match app-id="ONLYOFFICE"
+    match app-id="TDAppDesktop"
+    match app-id="libreoffice-writer"
     match app-id="code"
     match app-id="positron"
     match app-id="pycharm"
@@ -444,13 +451,10 @@ window-rule {
 }
 
 window-rule {
-    match app-id=r#"(?i).*synology.*drive.*"#
-    match app-id="launcher" title=r#"(?i).*synology.*drive.*"#
-    open-floating true
-}
-
-window-rule {
-    match app-id="dev.mohit.NiriSeek"
+    match app-id="cloud-drive-ui"
+    match app-id=r#"(?i).*synology.*"#
+    match app-id="launcher" title=r#"(?i).*synology.*"#
+    match app-id="wps" title="^wps$"
     open-floating true
 }
 
@@ -489,6 +493,13 @@ window-rule {
 window-rule {
     geometry-corner-radius 18
     clip-to-geometry true
+    popups {
+        geometry-corner-radius 15
+        opacity 0.95
+        background-effect {
+            blur true
+        }
+    }
 }
 
 binds {
@@ -505,10 +516,10 @@ binds {
     Mod+E hotkey-overlay-title=null { spawn "nautilus"; }
     Mod+B hotkey-overlay-title=null { spawn "google-chrome-stable"; }
     // 框选截图并直接复制到剪贴板
-    Ctrl+Shift+S repeat=false hotkey-overlay-title="截图并复制到剪贴板" { spawn "/home/tanzhenyu/.local/bin/satty-region" "copy"; }
+    Ctrl+Shift+S repeat=false hotkey-overlay-title="截图并复制到剪贴板" { spawn "~/.local/bin/satty-region" "copy"; }
     // 框选截图并进入 Satty 编辑
-    Ctrl+Alt+S repeat=false hotkey-overlay-title=null { spawn "/home/tanzhenyu/.local/bin/satty-region" "edit"; }
-    Alt+Space repeat=false hotkey-overlay-title=null { spawn "/home/tanzhenyu/.local/bin/niriseek"; }
+    Ctrl+Alt+S repeat=false hotkey-overlay-title=null { spawn "~/.local/bin/satty-region" "edit"; }
+    Mod+Tab repeat=false hotkey-overlay-title=null { spawn "~/.cargo/bin/niri-switch"; }
 
     // Mod-Shift-/, which is usually the same as Mod-?,
     // shows a list of important hotkeys.
@@ -692,7 +703,7 @@ binds {
     Ctrl+Tab repeat=false hotkey-overlay-title=null { spawn "noctalia" "msg" "window-switcher"; }
 
     // Switches focus between the current and the previous workspace.
-    Mod+Tab hotkey-overlay-title=null { focus-workspace-previous; }
+    // Mod+Tab hotkey-overlay-title=null { focus-workspace-previous; }
     // The following binds move the focused window in and out of a column.
     // If the window is alone, they will consume it into the nearby column to the side.
     // If the window is already in a column, they will expel it out.
